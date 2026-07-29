@@ -1,0 +1,90 @@
+name: Distribute release client patch DLL
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type PUBLISH to confirm launcher distribution"
+        required: true
+        type: string
+      release_number:
+        description: "Optional positive number; blank selects the next client-patches-vN"
+        required: false
+        type: string
+      prerelease:
+        description: "Mark the GitHub release as a prerelease"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: distribute-client-patch-release
+  cancel-in-progress: false
+
+jobs:
+  distribute:
+    name: Build, verify, and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Validate manual request
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]]; then
+            echo "Run this release workflow only from the default branch." >&2
+            exit 1
+          fi
+          if [[ "$CONFIRMATION" != "PUBLISH" ]]; then
+            echo "The confirmation input must be exactly PUBLISH." >&2
+            exit 1
+          fi
+
+      - name: Check out private source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes make g++ g++-mingw-w64-i686
+
+      - name: Test and package release DLL
+        run: |
+          make test
+          bash build-client-patch.sh package-release
+
+      # Mint the cross-repository credential only after untrusted build tools
+      # have exited. The app installation and token are both repository-scoped.
+      - name: Create public-release token
+        id: release-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.CLIENT_PATCH_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.CLIENT_PATCH_RELEASE_APP_PRIVATE_KEY }}
+          owner: Zotikus1001
+          repositories: commonwealth-ga-client-patches
+          permission-contents: write
+
+      - name: Publish verified public release
+        env:
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          RELEASE_NUMBER: ${{ inputs.release_number }}
+          MARK_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          args=()
+          if [[ -n "$RELEASE_NUMBER" ]]; then
+            args+=(--release-number "$RELEASE_NUMBER")
+          fi
+          if [[ "$MARK_PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          else
+            args+=(--stable)
+          fi
+          bash tools/publish-client-patch-release.sh "${args[@]}"

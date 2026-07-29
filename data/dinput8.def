@@ -1,0 +1,9 @@
+; Preserve the export names and ordinals expected from the 32-bit system
+; dinput8.dll. Implementations in DInput8Proxy.cpp forward each call.
+EXPORTS
+DirectInput8Create @1
+DllCanUnloadNow @2
+DllGetClassObject @3
+DllRegisterServer @4
+DllUnregisterServer @5
+GetdfDIJoystick @6

@@ -78,8 +78,8 @@ stages that exact asset under `out/distribution/`. The Actions-only publisher
 rejects a non-x86 PE file, embedded debug sections, a remaining debug map,
 missing repository write permission, and an existing release tag. It creates
 a draft, compares GitHub's asset size and SHA-256 digest with the local file,
-and publishes only after they match. If verification fails, the draft remains
-unpublished and the launcher ignores it.
+and publishes only after they match. If pre-publication verification fails,
+the draft remains unpublished and the launcher ignores it.
 
 Published releases are numbered `client-patches-vN`; an omitted number selects
 the next unused release number. The launcher chooses the newest publication
@@ -88,31 +88,50 @@ prereleases, so either choice distributes the DLL to players. Drafts do not.
 The workflow's normal `GITHUB_TOKEN` cannot modify a different repository, so
 it uses a GitHub App installed only on the public releases repository.
 
-Set it up once:
+### Publish a DLL release
 
-1. In GitHub **Settings > Developer settings > GitHub Apps**, register an app.
-   Use the public releases repository as its homepage, disable webhooks, and
-   grant repository **Contents: Read and write**; leave unrelated permissions
-   disabled.
-2. Install the app with access only to
-   `Zotikus1001/commonwealth-ga-client-patches`.
-3. Generate an app private key.
-4. In the private source repository under **Settings > Secrets and variables
-   > Actions**, add:
-   - Variable `CLIENT_PATCH_RELEASE_APP_CLIENT_ID` containing the app's client
-     ID.
-   - Secret `CLIENT_PATCH_RELEASE_APP_PRIVATE_KEY` containing the complete PEM
-     private key, including its BEGIN and END lines.
-5. Keep the default branch protected. Only grant private-repository write
-   access to people allowed to trigger releases.
+Every successful run distributes the resulting DLL to launcher users:
 
-After this workflow is committed to the private repository's default branch,
-open **Actions > Distribute release client patch DLL > Run workflow**. Type
-`PUBLISH`, optionally supply a positive release number, and choose whether
-GitHub marks it as a prerelease. The job runs the registry test, builds with
-all runner CPU cores, creates a short-lived app token scoped to the public
-repository, verifies the draft asset, and publishes it. The public repository
-receives only the DLL and release metadata, never this source tree.
+1. Commit and push the exact source intended for release to this private
+   repository's default branch. The workflow refuses to publish from another
+   branch.
+2. Open the private repository's
+   [Distribute release client patch DLL workflow][release-workflow].
+3. Click **Run workflow** and leave the selected branch on the default branch.
+4. Type `PUBLISH` exactly in the confirmation field.
+5. Normally leave **release number** blank. The publisher selects the next
+   unused `client-patches-vN`. Supply a positive number only when a specific
+   unused number is required; never reuse an existing release or tag.
+6. Choose whether GitHub labels the release as a prerelease.
+
+   **Both normal releases and prereleases are live launcher distribution.**
+   The prerelease setting changes GitHub's presentation only; it is not a test
+   or staged channel.
+7. Click **Run workflow**, open the new run, and wait for **Build, verify, and
+   publish** to finish.
+8. After a green run, open the
+   [public client-patch releases][public-releases] and confirm that the new
+   release is published, not a draft, and contains exactly:
+
+   ```text
+   Commonwealth-GA-Client-Patches-x86.dll
+   ```
+
+The job runs the registry test, builds with all runner CPU cores, creates a
+short-lived App token scoped to the public repository, uploads the asset as a
+draft, verifies its remote size and SHA-256 digest, and only then publishes
+it. The public repository receives only the DLL and release metadata, never
+this source tree.
+
+If the workflow fails, inspect both published releases and drafts before
+retrying. A retained draft is ignored by the launcher. A rare failure during
+the final post-publication check can occur after the release became visible,
+so a red workflow run alone does not prove that nothing was distributed.
+Never replace an asset inside an already published release; fix the source and
+publish a new numbered release.
+
+[release-workflow]: https://github.com/Zotikus1001/commonwealth-ga-client-patch/actions/workflows/distribute-client-patch.yml
+[public-releases]: https://github.com/Zotikus1001/commonwealth-ga-client-patches/releases
 
 ## Install and run
 

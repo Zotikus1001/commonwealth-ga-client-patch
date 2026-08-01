@@ -4,6 +4,7 @@
 
 #include "src/ClientPatches/MorphRebuildPerformance/MorphRebuildPerformancePatch.hpp"
 #include "src/ClientPatches/ScopedWeaponVisibility/ScopedWeaponVisibilityPatch.hpp"
+#include "src/ClientPatches/UI/FovSlider/FovSliderPatch.hpp"
 #include "src/Handshake/FeatureHandshakePatch.hpp"
 #include "src/Utils/ClientLogDirectory/ClientLogDirectory.hpp"
 #include "src/Utils/ClientExecutableGuard/ClientExecutableGuard.hpp"
@@ -84,6 +85,7 @@ DWORD WINAPI InstallHooks(LPVOID) {
 			static_cast<unsigned long long>(fingerprint.textHashPrefix));
 		return 0;
 	}
+	ClientFovSliderPatch::Initialize();
 	if (!RegisterClientFeatures()) {
 		Logger::Log(
 			"clientpatch",
@@ -105,6 +107,7 @@ DWORD WINAPI InstallHooks(LPVOID) {
 	result = ::DetourUpdateThread(::GetCurrentThread());
 	if (result == NO_ERROR) result = ClientMorphRebuildPerformancePatch::Install();
 	if (result == NO_ERROR) result = ClientScopedWeaponVisibilityPatch::Install();
+	if (result == NO_ERROR) result = ClientFovSliderPatch::Install();
 	if (result == NO_ERROR) result = FeatureHandshakePatch::InstallIfNeeded();
 	if (result != NO_ERROR) {
 		::DetourTransactionAbort();
@@ -126,7 +129,7 @@ DWORD WINAPI InstallHooks(LPVOID) {
 
 	Logger::Log(
 		"clientpatch",
-		"[ready] morph rebuild and scoped weapon visibility fixes installed\n");
+		"[ready] client patches installed: morph rebuild, scoped weapon visibility, FOV slider\n");
 	return 0;
 }
 

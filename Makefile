@@ -32,6 +32,7 @@ SOURCES := \
 	src/Handshake/FeatureHandshakePatch.cpp \
 	src/ClientPatches/MorphRebuildPerformance/MorphRebuildPerformancePatch.cpp \
 	src/ClientPatches/ScopedWeaponVisibility/ScopedWeaponVisibilityPatch.cpp \
+	src/ClientPatches/UI/FovSlider/FovSliderPatch.cpp \
 	src/Handshake/ClientFeatureRegistry.cpp \
 	src/EntryPoint/DllMain.cpp
 

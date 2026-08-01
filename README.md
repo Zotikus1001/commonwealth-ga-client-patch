@@ -10,7 +10,11 @@ A standalone 32-bit `dinput8.dll` proxy for the reviewed Global Agenda
 - **Scoped weapon visibility** prevents the local in-hand weapon mesh from
   being shown and hidden again every tick while scoped.
 
-These fixes are local-only. They install without a cooperating server and are
+## Included client features
+
+- **Field of view slider** in the in-game Video settings.
+
+These changes are local-only. They install without a cooperating server and are
 not registered with the feature gate.
 
 The DLL verifies the executable PE timestamp, image size, preferred and runtime

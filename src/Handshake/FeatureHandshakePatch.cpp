@@ -332,8 +332,9 @@ void DeliverDebugJoinSummary() {
 
 	QueueLocalInstanceMessage(
 		chatManager,
-		L"[Client Patch DEBUG] Local fixes loaded: "
-		L"Morph Rebuild Performance; Scoped Weapon Visibility.");
+		L"[Client Patch DEBUG] Local client patches loaded: "
+		L"Morph Rebuild Performance; Scoped Weapon Visibility; "
+		L"Field of View Slider.");
 
 	if (count == 0) {
 		QueueLocalInstanceMessage(

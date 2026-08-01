@@ -4,7 +4,7 @@
 
 namespace FovSetting {
 
-inline constexpr int kDefaultFov = 90;
+inline constexpr int kDefaultFov = 80;
 inline constexpr int kMaximumFov = 170;
 
 inline int Clamp(int value) {

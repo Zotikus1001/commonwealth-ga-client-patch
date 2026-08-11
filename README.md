@@ -18,6 +18,8 @@ A standalone 32-bit `dinput8.dll` proxy for the reviewed Global Agenda
 
 - **Field of view slider** in the in-game Video settings.
 - **Combat Text Scaling slider** in the in-game Video settings.
+- **Spectator nameplates** show player names, team colors, and health above
+  live players while spectating.
 
 These changes are local-only. They install without a cooperating server and are
 not registered with the feature gate.

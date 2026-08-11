@@ -6,6 +6,7 @@
 #include "src/ClientPatches/ScopedWeaponVisibility/ScopedWeaponVisibilityPatch.hpp"
 #include "src/ClientPatches/UI/CombatTextScale/CombatTextScalePatch.hpp"
 #include "src/ClientPatches/UI/F2StatsScaling/F2StatsScalingPatch.hpp"
+#include "src/ClientPatches/UI/SpectatorNameplates/SpectatorNameplatesPatch.hpp"
 #include "src/ClientPatches/UI/FovSlider/FovSliderPatch.hpp"
 #include "src/Handshake/FeatureHandshakePatch.hpp"
 #include "src/Utils/ClientLogDirectory/ClientLogDirectory.hpp"
@@ -112,6 +113,7 @@ DWORD WINAPI InstallHooks(LPVOID) {
 	if (result == NO_ERROR) result = ClientScopedWeaponVisibilityPatch::Install();
 	if (result == NO_ERROR) result = ClientCombatTextScalePatch::Install();
 	if (result == NO_ERROR) result = ClientF2StatsScalingPatch::Install();
+	if (result == NO_ERROR) result = ClientSpectatorNameplatesPatch::Install();
 	if (result == NO_ERROR) result = ClientFovSliderPatch::Install();
 	if (result == NO_ERROR) result = FeatureHandshakePatch::InstallIfNeeded();
 	if (result != NO_ERROR) {
@@ -135,7 +137,7 @@ DWORD WINAPI InstallHooks(LPVOID) {
 	Logger::Log(
 		"clientpatch",
 		"[ready] client patches installed: morph rebuild, scoped weapon visibility, "
-		"FOV slider, combat text scaling, F2 stats scaling, "
+		"spectator nameplates, FOV slider, combat text scaling, F2 stats scaling, "
 		"friendly name normalization\n");
 	return 0;
 }

@@ -165,20 +165,16 @@ fi
 gh "${create_args[@]}" >/dev/null
 draft_created=true
 
-tag_target="$(
-	gh api "repos/$release_repository/git/ref/tags/$release_tag" \
-		--jq '.object.sha'
-)" || fail "could not inspect the release tag"
-[[ "$tag_target" == "$GITHUB_SHA" ]] ||
-	fail "release tag does not point at the built commit"
-
-release_id="$(
+release_metadata="$(
 	gh release view "$release_tag" \
 		--repo "$release_repository" \
-		--json databaseId \
-		--jq '.databaseId'
-)" || fail "could not resolve the draft release ID"
+		--json databaseId,targetCommitish \
+		--jq '[.databaseId, .targetCommitish] | @tsv'
+)" || fail "could not resolve the draft release metadata"
+IFS=$'\t' read -r release_id target_commitish <<<"$release_metadata"
 [[ "$release_id" =~ ^[1-9][0-9]*$ ]] || fail "GitHub returned an invalid release ID"
+[[ "$target_commitish" == "$GITHUB_SHA" ]] ||
+	fail "draft release does not target the built commit"
 
 release_state="$(
 	gh api "repos/$release_repository/releases/$release_id" \
@@ -207,6 +203,13 @@ gh release edit "$release_tag" \
 	--repo "$release_repository" \
 	--draft=false >/dev/null
 release_published=true
+
+tag_target="$(
+	gh api "repos/$release_repository/git/ref/tags/$release_tag" \
+		--jq '.object.sha'
+)" || fail "release published, but its tag could not be inspected"
+[[ "$tag_target" == "$GITHUB_SHA" ]] ||
+	fail "published release tag does not point at the built commit"
 
 published_state="$(
 	gh release view "$release_tag" \

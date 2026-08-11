@@ -100,12 +100,6 @@ asset_size="${asset_size//[[:space:]]/}"
 [[ "$asset_sha256" =~ ^[a-f0-9]{64}$ ]] || fail "could not calculate DLL SHA-256"
 [[ "$asset_size" =~ ^[1-9][0-9]*$ ]] || fail "could not calculate DLL size"
 
-repository_push="$(
-	gh api "repos/$release_repository" --jq '.permissions.push // false'
-)" || fail "could not query the release repository"
-[[ "$repository_push" == "true" ]] ||
-	fail "GitHub credential has no write permission for $release_repository"
-
 release_tags="$(
 	gh release list \
 		--repo "$release_repository" \

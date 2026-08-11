@@ -4,6 +4,7 @@
 
 #include "src/ClientPatches/MorphRebuildPerformance/MorphRebuildPerformancePatch.hpp"
 #include "src/ClientPatches/ScopedWeaponVisibility/ScopedWeaponVisibilityPatch.hpp"
+#include "src/ClientPatches/SpectatorNameplates/SpectatorNameplatesPatch.hpp"
 #include "src/ClientPatches/UI/FovSlider/FovSliderPatch.hpp"
 #include "src/Handshake/FeatureHandshakePatch.hpp"
 #include "src/Utils/ClientLogDirectory/ClientLogDirectory.hpp"
@@ -107,6 +108,7 @@ DWORD WINAPI InstallHooks(LPVOID) {
 	result = ::DetourUpdateThread(::GetCurrentThread());
 	if (result == NO_ERROR) result = ClientMorphRebuildPerformancePatch::Install();
 	if (result == NO_ERROR) result = ClientScopedWeaponVisibilityPatch::Install();
+	if (result == NO_ERROR) result = ClientSpectatorNameplatesPatch::Install();
 	if (result == NO_ERROR) result = ClientFovSliderPatch::Install();
 	if (result == NO_ERROR) result = FeatureHandshakePatch::InstallIfNeeded();
 	if (result != NO_ERROR) {
@@ -129,7 +131,8 @@ DWORD WINAPI InstallHooks(LPVOID) {
 
 	Logger::Log(
 		"clientpatch",
-		"[ready] client patches installed: morph rebuild, scoped weapon visibility, FOV slider\n");
+		"[ready] client patches installed: morph rebuild, scoped weapon visibility, "
+		"spectator nameplates, FOV slider\n");
 	return 0;
 }
 

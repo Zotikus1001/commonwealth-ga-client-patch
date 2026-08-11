@@ -1,4 +1,4 @@
-# The DLL is always a 32-bit Windows binary. Linux and MSYS2 use the same
+﻿# The DLL is always a 32-bit Windows binary. Linux and MSYS2 use the same
 # MinGW-w64 cross-compiler; HOST_CXX builds a host-runnable registry test.
 CXX := i686-w64-mingw32-g++
 
@@ -32,6 +32,9 @@ SOURCES := \
 	src/Handshake/FeatureHandshakePatch.cpp \
 	src/ClientPatches/MorphRebuildPerformance/MorphRebuildPerformancePatch.cpp \
 	src/ClientPatches/ScopedWeaponVisibility/ScopedWeaponVisibilityPatch.cpp \
+	src/ClientPatches/SpectatorNameplates/SpectatorNameplateDraw.cpp \
+	src/ClientPatches/SpectatorNameplates/SpectatorNameplateSettings.cpp \
+	src/ClientPatches/SpectatorNameplates/SpectatorNameplatesPatch.cpp \
 	src/ClientPatches/UI/FovSlider/FovSliderPatch.cpp \
 	src/Handshake/ClientFeatureRegistry.cpp \
 	src/EntryPoint/DllMain.cpp

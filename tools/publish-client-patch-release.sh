@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Publishes only the already packaged release asset. Build before obtaining a
-# release credential so compiler and test processes never inherit that token.
+# Publishes only the already packaged release asset. The workflow gives this
+# script a repository-scoped token only after the read-only build job finishes.
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-release_repository="Zotikus1001/commonwealth-ga-client-patches"
+release_repository="${GITHUB_REPOSITORY:-}"
 asset_name="Commonwealth-GA-Client-Patches-x86.dll"
 asset_path="$repo_dir/out/distribution/$asset_name"
+minimum_release_number=4
 release_number=""
 release_kind=""
 
@@ -64,6 +65,15 @@ fi
 [[ -n "$release_kind" ]] || fail "choose either --prerelease or --stable"
 [[ "${GITHUB_ACTIONS:-}" == "true" ]] ||
 	fail "release publishing is restricted to GitHub Actions"
+[[ "$release_repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] ||
+	fail "GITHUB_REPOSITORY is missing or invalid"
+[[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ ]] ||
+	fail "GITHUB_SHA is missing or invalid"
+
+if [[ -n "$release_number" ]] &&
+	((10#$release_number < minimum_release_number)); then
+	fail "release number must be $minimum_release_number or greater"
+fi
 
 for tool in gh i686-w64-mingw32-objdump sha256sum grep; do
 	command -v "$tool" >/dev/null 2>&1 || fail "missing required tool: $tool"
@@ -92,7 +102,7 @@ asset_size="${asset_size//[[:space:]]/}"
 
 repository_push="$(
 	gh api "repos/$release_repository" --jq '.permissions.push // false'
-)" || fail "could not query the public release repository"
+)" || fail "could not query the release repository"
 [[ "$repository_push" == "true" ]] ||
 	fail "GitHub credential has no write permission for $release_repository"
 
@@ -105,7 +115,7 @@ release_tags="$(
 )" || fail "could not list existing releases"
 
 if [[ -z "$release_number" ]]; then
-	max_release=0
+	max_release=$((minimum_release_number - 1))
 	while IFS= read -r tag; do
 		if [[ "$tag" =~ ^client-patches-v([1-9][0-9]*)$ ]]; then
 			number="${BASH_REMATCH[1]}"
@@ -128,7 +138,7 @@ if gh api "repos/$release_repository/git/ref/tags/$release_tag" --silent >/dev/n
 fi
 
 echo
-echo "Public repository: $release_repository"
+echo "Repository:        $release_repository"
 echo "Release tag:      $release_tag"
 echo "Release type:     $release_kind"
 echo "Asset:            $asset_name"
@@ -149,6 +159,7 @@ trap report_unpublished_draft EXIT
 create_args=(
 	release create "$release_tag" "$asset_path"
 	--repo "$release_repository"
+	--target "$GITHUB_SHA"
 	--title "$release_title"
 	--notes "Launcher-managed client patch release."
 	--draft
@@ -159,6 +170,13 @@ fi
 
 gh "${create_args[@]}" >/dev/null
 draft_created=true
+
+tag_target="$(
+	gh api "repos/$release_repository/git/ref/tags/$release_tag" \
+		--jq '.object.sha'
+)" || fail "could not inspect the release tag"
+[[ "$tag_target" == "$GITHUB_SHA" ]] ||
+	fail "release tag does not point at the built commit"
 
 release_id="$(
 	gh release view "$release_tag" \

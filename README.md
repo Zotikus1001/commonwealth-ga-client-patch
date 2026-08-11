@@ -9,14 +9,15 @@ A standalone 32-bit `dinput8.dll` proxy for the reviewed Global Agenda
   render-thread update copy before UE3 rebuilds the morph vertex buffer.
 - **Scoped weapon visibility** prevents the local in-hand weapon mesh from
   being shown and hidden again every tick while scoped.
+- **Automatic F2 stats scaling** keeps the performance overlay readable above
+  its 1080p baseline.
+- **Friendly overhead-name normalization** preserves the intended name size
+  above 1080p.
 
 ## Included client features
 
 - **Field of view slider** in the in-game Video settings.
-- **Combat text scaling slider** for damage/healing, reticle pool values, and
-  the enemy target marker.
-- **Automatic F2 stats scaling** relative to a 1080p baseline.
-- **Friendly overhead-name normalization** above 1080p.
+- **Combat Text Scaling slider** in the in-game Video settings.
 
 These changes are local-only. They install without a cooperating server and are
 not registered with the feature gate.
@@ -69,105 +70,6 @@ The Windows menu and shell builder pass Make the number of processors
 available to the current process; neither uses a fixed parallel-job count.
 
 Run the platform-neutral registry test with `make test`.
-
-## Distribute through GitHub Actions
-
-The launcher reads releases from
-`Zotikus1001/commonwealth-ga-client-patches` and accepts only the exact asset
-name:
-
-```text
-Commonwealth-GA-Client-Patches-x86.dll
-```
-
-The manually triggered **Distribute release client patch DLL** workflow runs
-the `package-release` target first. It performs a clean optimized build and
-stages that exact asset under `out/distribution/`. The Actions-only publisher
-rejects a non-x86 PE file, embedded debug sections, a remaining debug map,
-missing repository write permission, and an existing release tag. It creates
-a draft, compares GitHub's asset size and SHA-256 digest with the local file,
-and publishes only after they match. If pre-publication verification fails,
-the draft remains unpublished and the launcher ignores it.
-
-Published releases are numbered `client-patches-vN`; an omitted number selects
-the next unused release number. The launcher chooses the newest publication
-containing the expected asset. It accepts both normal releases and
-prereleases, so either choice distributes the DLL to players. Drafts do not.
-The workflow's normal `GITHUB_TOKEN` cannot modify a different repository, so
-it uses a GitHub App installed only on the public releases repository.
-
-### Publish a DLL release
-
-Every successful run distributes the resulting DLL to launcher users:
-
-1. Commit and push the exact source intended for release to this private
-   repository's default branch. The workflow refuses to publish from another
-   branch.
-2. Open the private repository's
-   [Distribute release client patch DLL workflow][release-workflow].
-3. Click **Run workflow** and leave the selected branch on the default branch.
-4. Type `PUBLISH` exactly in the confirmation field.
-5. Normally leave **release number** blank. The publisher selects the next
-   unused `client-patches-vN`. Supply a positive number only when a specific
-   unused number is required; never reuse an existing release or tag.
-6. Choose whether GitHub labels the release as a prerelease.
-
-   **Both normal releases and prereleases are live launcher distribution.**
-   The prerelease setting changes GitHub's presentation only; it is not a test
-   or staged channel.
-7. Click **Run workflow**, open the new run, and wait for **Build, verify, and
-   publish** to finish.
-8. After a green run, open the
-   [public client-patch releases][public-releases] and confirm that the new
-   release is published, not a draft, and contains exactly:
-
-   ```text
-   Commonwealth-GA-Client-Patches-x86.dll
-   ```
-
-The job runs the registry test, builds with all runner CPU cores, creates a
-short-lived App token scoped to the public repository, uploads the asset as a
-draft, verifies its remote size and SHA-256 digest, and only then publishes
-it. The public repository receives only the DLL and release metadata, never
-this source tree.
-
-If the workflow fails, inspect both published releases and drafts before
-retrying. A retained draft is ignored by the launcher. A rare failure during
-the final post-publication check can occur after the release became visible,
-so a red workflow run alone does not prove that nothing was distributed.
-Never replace an asset inside an already published release; fix the source and
-publish a new numbered release.
-
-[release-workflow]: https://github.com/Zotikus1001/commonwealth-ga-client-patch/actions/workflows/distribute-client-patch.yml
-[public-releases]: https://github.com/Zotikus1001/commonwealth-ga-client-patches/releases
-
-## Install and run
-
-Place the built `dinput8.dll` beside `GlobalAgenda.exe`. Back up any existing
-proxy DLL before replacing it.
-
-Under Wine, configure `dinput8` as native before builtin. The output remains a
-Win32 DLL; Wine loads it rather than treating it as a native Linux `.so`.
-
-All normal and crash logs go to the `logs` directory beside
-`GlobalAgenda.exe`. The patch never writes log files into the executable
-directory itself. A DEBUG build uses this hierarchy:
-
-```text
-logs/
-  process-<start-time>__pid<PID>/
-    startup/
-    instance-0001__<join-time>/
-    instance-0002__<join-time>/
-```
-
-`startup` receives diagnostics before the first instance join. Each
-`ReceivedPlayer` boundary then selects a fresh numbered instance child for
-both normal channel files and crash reports. The process root prevents
-concurrent clients from mixing output, while the children separate repeated
-instance joins made by one running client. If directory rotation fails, the
-previous directory remains active and the failure is logged there. Release
-operational and crash logs remain directly under `logs`.
 
 ## Opt-in server feature gate
 

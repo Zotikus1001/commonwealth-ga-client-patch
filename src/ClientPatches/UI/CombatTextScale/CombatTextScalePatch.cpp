@@ -24,9 +24,13 @@ constexpr float kCombatSecondShadowBaselineOffset = 23.0f;
 constexpr float kCombatTextBaselineOffset = 22.0f;
 
 constexpr std::uintptr_t kBorderedGlyphNameAddress = 0x109dd690u;
-constexpr std::uintptr_t kBorderedGlyphNameCallerReturn = 0x109e9d70u;
+constexpr std::uintptr_t kBorderedPlayerNameCallerReturn = 0x109e9d70u;
+constexpr std::uintptr_t kBorderedFirstAffiliationCallerReturn = 0x109e9ed5u;
+constexpr std::uintptr_t kBorderedSecondAffiliationCallerReturn = 0x109ea03au;
 constexpr std::uintptr_t kRawGlyphNameAddress = 0x109d8250u;
-constexpr std::uintptr_t kRawGlyphNameCallerReturn = 0x109e9d10u;
+constexpr std::uintptr_t kRawPlayerNameCallerReturn = 0x109e9d10u;
+constexpr std::uintptr_t kRawFirstAffiliationCallerReturn = 0x109e9e75u;
+constexpr std::uintptr_t kRawSecondAffiliationCallerReturn = 0x109e9fdau;
 constexpr std::uintptr_t kRawGlyphNameDrawTextReturn = 0x109d82e1u;
 constexpr std::uintptr_t kDrawMaterialTileAddress = 0x10ed1030u;
 constexpr std::uintptr_t kTargetMarkerDrawReturn = 0x109e7607u;
@@ -184,7 +188,21 @@ bool IsCombatTextCall(std::uintptr_t returnAddress) {
 		returnAddress == kCombatTextReturn;
 }
 
-float FriendlyNameScale(float viewportHeight) {
+// The retail helpers are shared by unrelated UI. These six returns are the
+// player name and two optional affiliation lines in the friendly label stack.
+bool IsRawFriendlyLabelCall(std::uintptr_t returnAddress) {
+	return returnAddress == kRawPlayerNameCallerReturn ||
+		returnAddress == kRawFirstAffiliationCallerReturn ||
+		returnAddress == kRawSecondAffiliationCallerReturn;
+}
+
+bool IsBorderedFriendlyLabelCall(std::uintptr_t returnAddress) {
+	return returnAddress == kBorderedPlayerNameCallerReturn ||
+		returnAddress == kBorderedFirstAffiliationCallerReturn ||
+		returnAddress == kBorderedSecondAffiliationCallerReturn;
+}
+
+float FriendlyLabelScale(float viewportHeight) {
 	if (!std::isfinite(viewportHeight) ||
 		viewportHeight <= kReferenceViewportHeight) {
 		return 1.0f;
@@ -454,11 +472,13 @@ int __cdecl RawGlyphName(
 	const std::uintptr_t returnAddress =
 		reinterpret_cast<std::uintptr_t>(__builtin_return_address(0));
 	const RawNameContext previous = g_rawNameContext;
-	if (returnAddress == kRawGlyphNameCallerReturn && canvas && font &&
-		std::isfinite(retailScale) && retailScale > 0.0f) {
+	const float labelScale = canvas ? FriendlyLabelScale(canvas->clipY) : 1.0f;
+	if (IsRawFriendlyLabelCall(returnAddress) &&
+		std::fabs(labelScale - 1.0f) >= 0.0001f &&
+		canvas && font && std::isfinite(retailScale) && retailScale > 0.0f) {
 		g_rawNameContext = {
 			true, font, retailScale,
-			retailScale * FriendlyNameScale(canvas->clipY)};
+			retailScale * labelScale};
 	}
 	const int result = g_rawGlyphName(
 		canvas, x, y, text, font, color, retailScale);
@@ -642,8 +662,8 @@ int __cdecl BorderedGlyphName(
 	void* font, std::uint32_t color, float retailScale) {
 	const std::uintptr_t returnAddress =
 		reinterpret_cast<std::uintptr_t>(__builtin_return_address(0));
-	const float scale = canvas ? FriendlyNameScale(canvas->clipY) : 1.0f;
-	if (returnAddress != kBorderedGlyphNameCallerReturn ||
+	const float scale = canvas ? FriendlyLabelScale(canvas->clipY) : 1.0f;
+	if (!IsBorderedFriendlyLabelCall(returnAddress) ||
 		std::fabs(scale - 1.0f) < 0.0001f ||
 		!canvas || !text || !text->data || text->count <= 0 || !font ||
 		!std::isfinite(retailScale) || retailScale <= 0.0f) {

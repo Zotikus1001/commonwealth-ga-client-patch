@@ -11,8 +11,8 @@ A standalone 32-bit `dinput8.dll` proxy for the reviewed Global Agenda
   being shown and hidden again every tick while scoped.
 - **Automatic F2 stats scaling** keeps the performance overlay readable above
   its 1080p baseline.
-- **Friendly overhead-name normalization** preserves the intended name size
-  above 1080p.
+- **Friendly overhead-label normalization** keeps player, agency, and alliance
+  text scaled together above 1080p without changing 1080p rendering.
 
 ## Included client features
 

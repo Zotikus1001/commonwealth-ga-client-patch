@@ -138,7 +138,7 @@ DWORD WINAPI InstallHooks(LPVOID) {
 		"clientpatch",
 		"[ready] client patches installed: morph rebuild, scoped weapon visibility, "
 		"spectator nameplates, FOV slider, combat text scaling, F2 stats scaling, "
-		"friendly name normalization\n");
+		"friendly label normalization\n");
 	return 0;
 }
 

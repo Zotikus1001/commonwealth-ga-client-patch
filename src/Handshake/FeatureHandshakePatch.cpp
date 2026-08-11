@@ -335,7 +335,7 @@ void DeliverDebugJoinSummary() {
 		L"[Client Patch DEBUG] Local client patches loaded: "
 		L"Morph Rebuild Performance; Scoped Weapon Visibility; "
 		L"Field of View Slider; Combat Text Scaling; F2 Stats Scaling; "
-		L"Friendly Name Normalization.");
+		L"Friendly Label Normalization.");
 
 	if (count == 0) {
 		QueueLocalInstanceMessage(

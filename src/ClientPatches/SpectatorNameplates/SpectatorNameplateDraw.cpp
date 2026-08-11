@@ -1,5 +1,6 @@
 #include "src/ClientPatches/SpectatorNameplates/SpectatorNameplateDraw.hpp"
 
+#include "src/ClientPatches/SpectatorNameplates/SpectatorNameplateFormat.hpp"
 #include "src/ClientPatches/SpectatorNameplates/SpectatorNameplateSettings.hpp"
 
 #include <cmath>
@@ -265,41 +266,12 @@ void FillRect(CanvasView* canvas, float x, float y, float w, float h,
 
 struct Rgb { std::uint8_t r, g, b; };
 
-// 0-255 ini channel pair -> normalised colour component, interpolated by t.
-float Lerp255(int lowByte, int highByte, float t) {
-	const float lo = static_cast<float>(lowByte)  / 255.0f;
-	const float hi = static_cast<float>(highByte) / 255.0f;
-	return lo + (hi - lo) * t;
-}
-
-float Clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
-
-// Minimal integer formatter — keeps swprintf and its CRT/locale baggage out of
-// the render loop.
-void AppendInt(wchar_t* buffer, int capacity, int& at, int value) {
-	if (value < 0) value = 0;
-	wchar_t digits[12];
-	int n = 0;
-	do { digits[n++] = static_cast<wchar_t>(L'0' + (value % 10)); value /= 10; }
-	while (value && n < 12);
-	while (n > 0 && at < capacity - 1) buffer[at++] = digits[--n];
-}
-
-void FormatStats(wchar_t* buffer, int capacity, int hp, int hpMax,
-                 int pw, int pwMax, bool includePower) {
-	int at = 0;
-	AppendInt(buffer, capacity, at, hp);
-	if (at < capacity - 1) buffer[at++] = L'/';
-	AppendInt(buffer, capacity, at, hpMax);
-	if (includePower) {
-		if (at < capacity - 1) buffer[at++] = L' ';
-		if (at < capacity - 1) buffer[at++] = L' ';
-		AppendInt(buffer, capacity, at, pw);
-		if (at < capacity - 1) buffer[at++] = L'/';
-		AppendInt(buffer, capacity, at, pwMax);
-	}
-	buffer[at] = L'\0';
-}
+// Colour interpolation and stat-line formatting live in the header so
+// tests/spectator_nameplate_format_test.cpp can exercise them off-game.
+using SpectatorNameplateFormat::BarFraction;
+using SpectatorNameplateFormat::Clamp01;
+using SpectatorNameplateFormat::FormatStats;
+using SpectatorNameplateFormat::Lerp255;
 
 // Attackers red, defenders blue, unknown white — matching the scoreboard's
 // own sense of the two sides rather than inventing a new scheme.
@@ -500,9 +472,9 @@ void Render(void* hudPointer) {
 			const float pw    = pawn->r_fCurrentPowerPool;
 			const float pwMax = pawn->r_fMaxPowerPool;
 
-			const float hpFrac = (hpMax > 0)
-				? Clamp01(static_cast<float>(hp) / static_cast<float>(hpMax)) : 0.0f;
-			const float pwFrac = (pwMax > 0.0f) ? Clamp01(pw / pwMax) : 0.0f;
+			const float hpFrac = BarFraction(static_cast<float>(hp),
+			                                 static_cast<float>(hpMax));
+			const float pwFrac = BarFraction(pw, pwMax);
 
 			if (cfg.healthDisplay == 1) {
 				const float barW = static_cast<float>(cfg.barWidth) * cfg.scale;

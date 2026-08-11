@@ -1,5 +1,7 @@
 #include "src/ClientPatches/SpectatorNameplates/SpectatorNameplateSettings.hpp"
 
+#include "src/ClientPatches/SpectatorNameplates/SpectatorNameplateFormat.hpp"
+
 #include <windows.h>
 
 #include <string>
@@ -55,43 +57,31 @@ const SpectatorNameplateSettings& SpectatorNameplateSettings::Get() {
 	// Percent rather than a float key: GetPrivateProfileInt avoids pulling in
 	// string parsing and locale-dependent float conversion for one value.
 	const int scalePercent = ReadInt(s_path, "ScalePercent", 160);
-	s_current.scale = (scalePercent > 0) ? static_cast<float>(scalePercent) / 100.0f : 1.6f;
+	s_current.scale = SpectatorNameplateFormat::ScaleFromPercent(scalePercent, 1.6f);
 
 	s_current.heightOffset = static_cast<float>(ReadInt(s_path, "HeightOffset", 55));
 
-	int shadow = ReadInt(s_path, "ShadowAlpha", 200);
-	if (shadow < 0)   shadow = 0;
-	if (shadow > 255) shadow = 255;
-	s_current.shadowAlpha = shadow;
+	s_current.shadowAlpha = SpectatorNameplateFormat::ClampChannel(
+		ReadInt(s_path, "ShadowAlpha", 200));
 
-	const int maxDistance = ReadInt(s_path, "MaxDistance", 0);
-	s_current.maxDistance = (maxDistance > 0) ? static_cast<float>(maxDistance) : 0.0f;
+	s_current.maxDistance = SpectatorNameplateFormat::MaxDistanceFromIni(
+		ReadInt(s_path, "MaxDistance", 0));
 
-	int font = ReadInt(s_path, "Font", 1);
-	if (font < 0 || font > 2) font = 1;
-	s_current.font = font;
+	s_current.font = SpectatorNameplateFormat::ClampFont(ReadInt(s_path, "Font", 1));
 
-	int healthDisplay = ReadInt(s_path, "HealthDisplay", 1);
-	if (healthDisplay < 0 || healthDisplay > 2) healthDisplay = 1;
-	s_current.healthDisplay = healthDisplay;
+	s_current.healthDisplay = SpectatorNameplateFormat::ClampHealthDisplay(
+		ReadInt(s_path, "HealthDisplay", 1));
 
-	int barWidth = ReadInt(s_path, "BarWidth", 60);
-	if (barWidth < 4)   barWidth = 4;
-	if (barWidth > 400) barWidth = 400;
-	s_current.barWidth = barWidth;
+	s_current.barWidth = SpectatorNameplateFormat::ClampBarWidth(
+		ReadInt(s_path, "BarWidth", 60));
 
-	int barHeight = ReadInt(s_path, "BarHeight", 5);
-	if (barHeight < 1)  barHeight = 1;
-	if (barHeight > 40) barHeight = 40;
-	s_current.barHeight = barHeight;
+	s_current.barHeight = SpectatorNameplateFormat::ClampBarHeight(
+		ReadInt(s_path, "BarHeight", 5));
 
 	s_current.showPowerBar = ReadInt(s_path, "ShowPowerBar", 0) != 0;
 
 	auto channel = [&](const char* key, int fallback) {
-		int v = ReadInt(s_path, key, fallback);
-		if (v < 0)   v = 0;
-		if (v > 255) v = 255;
-		return v;
+		return SpectatorNameplateFormat::ClampChannel(ReadInt(s_path, key, fallback));
 	};
 	s_current.healthFullR = channel("HealthFullR", 40);
 	s_current.healthFullG = channel("HealthFullG", 230);

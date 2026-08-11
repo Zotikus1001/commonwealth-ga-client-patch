@@ -11,11 +11,6 @@ on:
         description: "Optional positive number; blank selects the next client-patches-vN"
         required: false
         type: string
-      prerelease:
-        description: "Mark the GitHub release as a prerelease"
-        required: true
-        default: true
-        type: boolean
 
 permissions:
   contents: read
@@ -100,15 +95,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_NUMBER: ${{ inputs.release_number }}
-          MARK_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           args=()
           if [[ -n "$RELEASE_NUMBER" ]]; then
             args+=(--release-number "$RELEASE_NUMBER")
           fi
-          if [[ "$MARK_PRERELEASE" == "true" ]]; then
-            args+=(--prerelease)
-          else
-            args+=(--stable)
-          fi
+          args+=(--stable)
           bash tools/publish-client-patch-release.sh "${args[@]}"

@@ -28,10 +28,15 @@ SOURCES := \
 	src/Utils/ClientLogDirectory/ClientLogDirectory.cpp \
 	src/Utils/CrashHandler/CrashHandler.cpp \
 	src/Utils/ClientExecutableGuard/ClientExecutableGuard.cpp \
+	src/Utils/GameWindow/GameWindow.cpp \
+	src/ClientRuntime/EngineConfig.cpp \
+	src/ClientRuntime/EngineFont.cpp \
 	src/Handshake/FeatureRegistry.cpp \
 	src/Handshake/FeatureHandshakePatch.cpp \
 	src/ClientPatches/MorphRebuildPerformance/MorphRebuildPerformancePatch.cpp \
 	src/ClientPatches/ScopedWeaponVisibility/ScopedWeaponVisibilityPatch.cpp \
+	src/ClientPatches/UI/CombatTextScale/CombatTextScalePatch.cpp \
+	src/ClientPatches/UI/F2StatsScaling/F2StatsScalingPatch.cpp \
 	src/ClientPatches/UI/FovSlider/FovSliderPatch.cpp \
 	src/Handshake/ClientFeatureRegistry.cpp \
 	src/EntryPoint/DllMain.cpp

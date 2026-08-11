@@ -334,7 +334,8 @@ void DeliverDebugJoinSummary() {
 		chatManager,
 		L"[Client Patch DEBUG] Local client patches loaded: "
 		L"Morph Rebuild Performance; Scoped Weapon Visibility; "
-		L"Field of View Slider.");
+		L"Field of View Slider; Combat Text Scaling; F2 Stats Scaling; "
+		L"Friendly Name Normalization.");
 
 	if (count == 0) {
 		QueueLocalInstanceMessage(

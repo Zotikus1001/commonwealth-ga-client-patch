@@ -13,6 +13,10 @@ A standalone 32-bit `dinput8.dll` proxy for the reviewed Global Agenda
 ## Included client features
 
 - **Field of view slider** in the in-game Video settings.
+- **Combat text scaling slider** for damage/healing, reticle pool values, and
+  the enemy target marker.
+- **Automatic F2 stats scaling** relative to a 1080p baseline.
+- **Friendly overhead-name normalization** above 1080p.
 
 These changes are local-only. They install without a cooperating server and are
 not registered with the feature gate.

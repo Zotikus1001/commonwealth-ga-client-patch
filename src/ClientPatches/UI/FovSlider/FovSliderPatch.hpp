@@ -2,8 +2,8 @@
 
 #include "src/pch.hpp"
 
-// Local Video-settings extension. All UI ownership, persistence, ABI views,
-// and travel-reset behavior remain inside this patch.
+// Owns the shared retail Video-menu hooks, slider composition, and FOV
+// lifecycle.
 class ClientFovSliderPatch {
 public:
 	static void Initialize();

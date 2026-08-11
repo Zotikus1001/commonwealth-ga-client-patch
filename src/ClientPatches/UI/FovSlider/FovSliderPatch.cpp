@@ -1,13 +1,15 @@
 #include "src/ClientPatches/UI/FovSlider/FovSliderPatch.hpp"
 
+#include "src/ClientPatches/UI/CombatTextScale/CombatTextScalePatch.hpp"
+#include "src/ClientPatches/UI/CombatTextScale/CombatTextScaleSetting.hpp"
 #include "src/ClientPatches/UI/FovSlider/FovSetting.hpp"
+#include "src/ClientRuntime/EngineConfig.hpp"
 #include "src/Utils/HookBase.hpp"
 #include "src/Utils/Logger/Logger.hpp"
 
 #include <cmath>
+#include <cstring>
 #include <cwchar>
-#include <string>
-#include <vector>
 
 namespace {
 
@@ -18,17 +20,18 @@ constexpr std::uintptr_t kGetPlayerOwnerAddress = 0x10B5E360u;
 constexpr std::uintptr_t kSliderGetValueAddress = 0x10B5AF00u;
 constexpr std::uintptr_t kSliderSetValueAddress = 0x10B5CC90u;
 constexpr std::uintptr_t kDestroyStringAddress = 0x112C18C0u;
-constexpr std::uintptr_t kConfigSetIntAddress = 0x1131EFF0u;
-constexpr std::uintptr_t kConfigFlushAddress = 0x1131C880u;
-constexpr std::uintptr_t kGlobalConfigAddress = 0x134237DCu;
-constexpr std::uintptr_t kEngineIniAddress = 0x1342C0A8u;
 constexpr std::size_t kInsertChildVtableOffset = 0x128u;
 constexpr std::uint32_t kHiddenFlag = 0x1u;
 constexpr int kMaximumObjectCount = 1000000;
 constexpr int kMaximumChildrenPerWidget = 4096;
+// The retail right column ends this many Brightness widths past its left edge.
+constexpr float kRightColumnWidthFraction = 1.67f;
 
 constexpr wchar_t kConfigSection[] = L"Commonwealth.ClientPatch";
-constexpr wchar_t kConfigValue[] = L"FieldOfView";
+constexpr wchar_t kFovConfigValue[] = L"FieldOfView";
+constexpr wchar_t kFovLabelFormat[] = L"FOV: %d";
+constexpr wchar_t kCombatTextScalingLabelFormat[] =
+	L"Combat Text Scaling: %d%%";
 
 struct ClassLayout {
 	UObject Object;
@@ -44,6 +47,14 @@ struct BoundsLayout {
 };
 
 struct UiObjectLayout;
+
+struct SliderRowGeometry {
+	float brightnessLeft;
+	float fovLeft;
+	float combatTextLeft;
+	float controlWidth;
+	float rowWidth;
+};
 
 struct ScreenObjectLayout {
 	UObject Object;
@@ -173,15 +184,16 @@ using InsertChildFunction = int(__thiscall*)(
 using SliderGetValueFunction = float(__thiscall*)(SliderLayout*, std::uint32_t);
 using SliderSetValueFunction = bool(__thiscall*)(SliderLayout*, float, std::uint32_t);
 using DestroyStringFunction = void(__thiscall*)(StringLayout*);
-using ConfigSetIntFunction = void(__thiscall*)(
-	void*, const wchar_t*, const wchar_t*, int, const wchar_t*);
-using ConfigFlushFunction = void(__thiscall*)(void*, int, const wchar_t*);
+struct ControlState {
+	UiObjectLayout* Label = nullptr;
+	SliderLayout* Slider = nullptr;
+};
 
 struct UiState {
 	VideoSceneLayout* Scene = nullptr;
 	SliderLayout* GammaSlider = nullptr;
-	UiObjectLayout* Label = nullptr;
-	SliderLayout* Slider = nullptr;
+	ControlState Fov;
+	ControlState CombatText;
 	bool Attempted = false;
 	bool Ready = false;
 };
@@ -239,7 +251,7 @@ UFunction* FindFunction(const char* ownerName, const char* functionName) {
 }
 
 bool IsA(const UObject* object, const char* className) {
-	if (!object || !object->Class) return false;
+	if (!object || !object->Class || !className) return false;
 	const auto* current = reinterpret_cast<const ClassLayout*>(object->Class);
 	for (int depth = 0; current && depth < 64; ++depth) {
 		if (ObjectNameEquals(&current->Object, className)) return true;
@@ -280,19 +292,31 @@ void SetVisible(UiObjectLayout* object, bool visible) {
 	}
 }
 
-void SetLabelText(UiObjectLayout* label, int fov) {
-	if (!label || !g_labelSetValueFunction) return;
-	wchar_t value[16]{};
+void SetLabelText(
+	UiObjectLayout* label, const wchar_t* format, int value) {
+	if (!label || !format || !g_labelSetValueFunction) return;
+	wchar_t text[32]{};
 	const int length = std::swprintf(
-		value,
-		sizeof(value) / sizeof(value[0]),
-		L"FOV: %d",
-		FovSetting::Clamp(fov));
+		text,
+		sizeof(text) / sizeof(text[0]),
+		format,
+		value);
 	if (length <= 0) return;
 	struct Parameters {
 		StringLayout NewText;
-	} parameters{{value, length + 1, length + 1}};
+	} parameters{{text, length + 1, length + 1}};
 	ProcessEvent(&label->Screen.Object, g_labelSetValueFunction, &parameters);
+}
+
+void SetFovLabelText(UiObjectLayout* label, int fov) {
+	SetLabelText(label, kFovLabelFormat, FovSetting::Clamp(fov));
+}
+
+void SetCombatTextScalingLabelText(UiObjectLayout* label, int percent) {
+	SetLabelText(
+		label,
+		kCombatTextScalingLabelFormat,
+		CombatTextScaleSetting::Clamp(percent));
 }
 
 void SetSliderValue(SliderLayout* slider, float value) {
@@ -314,16 +338,23 @@ void HideNewWidget(UiObjectLayout* widget) {
 void LogUiSetupFailure(const char* reason) {
 	Logger::Log(
 		"clientpatch",
-		"[fov-slider] Video control setup failed: %s\n",
+		"[video-sliders] control setup failed: %s\n",
 		reason);
 }
 
-bool ShiftRight(UiObjectLayout* widget, float delta) {
-	if (!widget || !std::isfinite(delta) ||
-		!std::isfinite(widget->Screen.Position.Value[0])) {
+bool PlaceInSliderRow(
+	UiObjectLayout* widget, float left, float width,
+	float rowWidth) {
+	if (!widget || !std::isfinite(left) ||
+		!std::isfinite(width) || !std::isfinite(rowWidth) ||
+		left < 0.0f || width <= 0.0f || rowWidth <= 0.0f ||
+		left > rowWidth - width ||
+		!std::isfinite(widget->Screen.Position.Value[0]) ||
+		!std::isfinite(widget->Screen.Position.Value[2])) {
 		return false;
 	}
-	widget->Screen.Position.Value[0] += delta;
+	widget->Screen.Position.Value[0] = left;
+	widget->Screen.Position.Value[2] = width;
 	for (std::uint8_t& invalidated : widget->Screen.Position.Invalidated) {
 		invalidated = 1;
 	}
@@ -370,6 +401,33 @@ bool DeriveColumnDelta(
 		return false;
 	}
 	*delta = candidate;
+	return true;
+}
+
+bool DeriveSliderRowGeometry(
+	const SliderLayout* source, float columnDelta,
+	SliderRowGeometry* geometry) {
+	if (!source || !geometry || !std::isfinite(columnDelta)) return false;
+	const float sourceLeft = source->Object.Screen.Position.Value[0];
+	const float width = source->Object.Screen.Position.Value[2];
+	const float rowWidth = sourceLeft + columnDelta +
+		width * kRightColumnWidthFraction;
+	const float gapWidth = rowWidth - width * 3.0f;
+	if (!std::isfinite(sourceLeft) || sourceLeft < 0.0f ||
+		!std::isfinite(width) || width <= 0.0f ||
+		!std::isfinite(rowWidth) || !std::isfinite(gapWidth) ||
+		gapWidth <= 0.0f) {
+		return false;
+	}
+
+	const float gap = gapWidth * 0.25f;
+	*geometry = {
+		gap,
+		width + gap * 2.0f,
+		width * 2.0f + gap * 3.0f,
+		width,
+		rowWidth,
+	};
 	return true;
 }
 
@@ -477,13 +535,60 @@ bool ExecuteFovCommand(PlayerControllerLayout* controller, int fov) {
 	return true;
 }
 
-void ConfigureSlider(SliderLayout* slider) {
-	slider->SliderValue.MinimumValue =
-		static_cast<float>(FovSetting::kDefaultFov);
-	slider->SliderValue.MaximumValue =
-		static_cast<float>(FovSetting::kMaximumFov);
+void ConfigureSlider(SliderLayout* slider, int minimum, int maximum) {
+	slider->SliderValue.MinimumValue = static_cast<float>(minimum);
+	slider->SliderValue.MaximumValue = static_cast<float>(maximum);
 	slider->SliderValue.NudgeValue = 1.0f;
 	slider->SliderValue.Flags = 1;
+}
+
+bool IsControlReady(
+	const ControlState& control, const VideoSceneLayout* scene) {
+	return scene && control.Label && control.Slider &&
+		IsRegisteredObject(&control.Label->Screen.Object) &&
+		IsRegisteredObject(&control.Slider->Object.Screen.Object) &&
+		control.Slider->Object.OnValueChanged.Object == &scene->Object;
+}
+
+bool CreateSliderControl(
+	VideoSceneLayout* scene,
+	SliderLayout* sourceSlider,
+	UiObjectLayout* sourceLabel,
+	float left,
+	float width,
+	float rowWidth,
+	int minimum,
+	int maximum,
+	int initialValue,
+	ControlState* result) {
+	if (!scene || !sourceSlider || !sourceLabel ||
+		!sourceSlider->Object.Owner || !result) {
+		return false;
+	}
+	UiObjectLayout* sliderObject = CreateClone(
+		scene, &sourceSlider->Object, sourceSlider->Object.Owner);
+	if (!sliderObject || sliderObject == &sourceSlider->Object ||
+		!IsA(&sliderObject->Screen.Object, "UISlider")) {
+		return false;
+	}
+	auto* slider = reinterpret_cast<SliderLayout*>(sliderObject);
+	HideNewWidget(sliderObject);
+	sliderObject->OnValueChanged = {};
+	ConfigureSlider(slider, minimum, maximum);
+	if (!PlaceInSliderRow(sliderObject, left, width, rowWidth) ||
+		!InsertClone(sourceSlider->Object.Owner, sliderObject)) {
+		return false;
+	}
+	SetSliderValue(slider, static_cast<float>(initialValue));
+
+	UiObjectLayout* label = CreateClone(scene, sourceLabel, sliderObject);
+	if (!label || label == sourceLabel) return false;
+	HideNewWidget(label);
+	if (!InsertClone(sliderObject, label)) return false;
+
+	result->Label = label;
+	result->Slider = slider;
+	return true;
 }
 
 void EnsureUi(VideoSceneLayout* scene) {
@@ -496,10 +601,8 @@ void EnsureUi(VideoSceneLayout* scene) {
 	SliderLayout* gammaSlider = scene->GammaCorrectionSlider;
 
 	if (g_ui.Scene == scene && g_ui.GammaSlider == gammaSlider) {
-		if (g_ui.Ready && g_ui.Label && g_ui.Slider &&
-			IsRegisteredObject(&g_ui.Label->Screen.Object) &&
-			IsRegisteredObject(&g_ui.Slider->Object.Screen.Object) &&
-			g_ui.Slider->Object.OnValueChanged.Object == &scene->Object) {
+		if (g_ui.Ready && IsControlReady(g_ui.Fov, scene) &&
+			IsControlReady(g_ui.CombatText, scene)) {
 			return;
 		}
 		if (g_ui.Attempted) return;
@@ -520,126 +623,113 @@ void EnsureUi(VideoSceneLayout* scene) {
 
 	UiObjectLayout* sourceLabel = FindSliderLabel(gammaSlider);
 	float columnDelta = 0.0f;
+	SliderRowGeometry rowGeometry = {};
 	if (!sourceLabel || sourceLabel->Owner != &gammaSlider->Object ||
-		!DeriveColumnDelta(scene, gammaSlider, &columnDelta)) {
+		!DeriveColumnDelta(scene, gammaSlider, &columnDelta) ||
+		!DeriveSliderRowGeometry(
+			gammaSlider, columnDelta, &rowGeometry)) {
 		LogUiSetupFailure("Brightness layout not verified");
 		return;
 	}
-
-	UiObjectLayout* sliderObject =
-		CreateClone(scene, &gammaSlider->Object, gammaSlider->Object.Owner);
-	if (!sliderObject || sliderObject == &gammaSlider->Object ||
-		!IsA(&sliderObject->Screen.Object, "UISlider")) {
-		LogUiSetupFailure("slider clone unavailable");
+	if (!PlaceInSliderRow(
+			&gammaSlider->Object,
+			rowGeometry.brightnessLeft,
+			rowGeometry.controlWidth,
+			rowGeometry.rowWidth)) {
+		LogUiSetupFailure("Brightness placement rejected");
 		return;
 	}
-	auto* slider = reinterpret_cast<SliderLayout*>(sliderObject);
-	HideNewWidget(sliderObject);
-	sliderObject->OnValueChanged = {};
 
 	const int preferred = CurrentPreferredFov();
-	const float initialValue = preferred == 0
-		? static_cast<float>(FovSetting::kDefaultFov)
-		: static_cast<float>(preferred);
-	ConfigureSlider(slider);
-	if (!ShiftRight(sliderObject, columnDelta) ||
-		!InsertClone(gammaSlider->Object.Owner, sliderObject)) {
-		LogUiSetupFailure("slider placement rejected");
+	const int initialFov = preferred == 0
+		? FovSetting::kDefaultFov
+		: preferred;
+	const int initialCombatTextScale = CombatTextScaleSetting::Clamp(
+		ClientCombatTextScalePatch::ScalePercent());
+	ControlState fov;
+	if (!CreateSliderControl(
+			scene,
+			gammaSlider,
+			sourceLabel,
+			rowGeometry.fovLeft,
+			rowGeometry.controlWidth,
+			rowGeometry.rowWidth,
+			FovSetting::kDefaultFov,
+			FovSetting::kMaximumFov,
+			initialFov,
+			&fov)) {
+		LogUiSetupFailure("FOV control creation rejected");
 		return;
 	}
-	SetSliderValue(slider, initialValue);
+	ControlState combatText;
+	if (!CreateSliderControl(
+			scene,
+			gammaSlider,
+			sourceLabel,
+			rowGeometry.combatTextLeft,
+			rowGeometry.controlWidth,
+			rowGeometry.rowWidth,
+			CombatTextScaleSetting::kMinimumPercent,
+			CombatTextScaleSetting::kMaximumPercent,
+			initialCombatTextScale,
+			&combatText)) {
+		LogUiSetupFailure("combat-text control creation rejected");
+		return;
+	}
 
-	UiObjectLayout* label = CreateClone(scene, sourceLabel, sliderObject);
-	if (!label || label == sourceLabel) {
-		LogUiSetupFailure("label clone unavailable");
-		return;
-	}
-	HideNewWidget(label);
-	if (!InsertClone(sliderObject, label)) {
-		LogUiSetupFailure("label placement rejected");
-		return;
-	}
-	SetLabelText(label, static_cast<int>(initialValue));
-
-	g_ui.Label = label;
-	g_ui.Slider = slider;
+	SetFovLabelText(fov.Label, initialFov);
+	SetCombatTextScalingLabelText(combatText.Label, initialCombatTextScale);
+	g_ui.Fov = fov;
+	g_ui.CombatText = combatText;
+	fov.Slider->Object.OnValueChanged = gammaSlider->Object.OnValueChanged;
+	combatText.Slider->Object.OnValueChanged =
+		gammaSlider->Object.OnValueChanged;
 	g_ui.Ready = true;
-	sliderObject->OnValueChanged = gammaSlider->Object.OnValueChanged;
-	SetVisible(label, true);
-	SetVisible(sliderObject, true);
+	SetVisible(fov.Label, true);
+	SetVisible(&fov.Slider->Object, true);
+	SetVisible(combatText.Label, true);
+	SetVisible(&combatText.Slider->Object, true);
 }
 
-std::wstring ResolveConfigPath() {
-	std::vector<wchar_t> executablePath(MAX_PATH);
-	DWORD pathLength = 0;
-	for (;;) {
-		pathLength = GetModuleFileNameW(
-			nullptr,
-			executablePath.data(),
-			static_cast<DWORD>(executablePath.size()));
-		if (pathLength == 0) return {};
-		if (pathLength < executablePath.size()) break;
-		if (executablePath.size() >= 32768) return {};
-		executablePath.resize(executablePath.size() * 2);
+bool PersistFovPreference(int fov) {
+	return EngineConfig::SaveInt(
+		kConfigSection, kFovConfigValue, FovSetting::Clamp(fov));
+}
+
+int SelectedFov(VideoSceneLayout* scene) {
+	if (!scene || !g_ui.Ready || g_ui.Scene != scene || !g_ui.Fov.Slider) {
+		return 0;
 	}
+	return FovSetting::FromSlider(GetSliderValue(g_ui.Fov.Slider));
+}
 
-	std::wstring path(executablePath.data(), pathLength);
-	const std::size_t slash = path.find_last_of(L"\\/");
-	if (slash == std::wstring::npos) return {};
-	path.resize(slash);
-	path += L"\\..\\TgGame\\Config\\TgEngine.ini";
-	const DWORD attributes = GetFileAttributesW(path.c_str());
-	if (attributes == INVALID_FILE_ATTRIBUTES ||
-		(attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-		return {};
+int SelectedCombatTextScale(VideoSceneLayout* scene) {
+	if (!scene || !g_ui.Ready || g_ui.Scene != scene ||
+		!g_ui.CombatText.Slider) {
+		return 0;
 	}
-	return path;
+	return CombatTextScaleSetting::FromSlider(
+		GetSliderValue(g_ui.CombatText.Slider));
 }
 
-bool PersistPreference(int fov) {
-	void* const configCache =
-		*reinterpret_cast<void**>(kGlobalConfigAddress);
-	const auto* const engineIni =
-		reinterpret_cast<const wchar_t*>(kEngineIniAddress);
-	if (!configCache || engineIni[0] == L'\0') return false;
-
-	// Retail graphics Apply saves through this cache. A direct INI write is
-	// overwritten when the engine later flushes its older cached contents.
-	const auto setInt =
-		reinterpret_cast<ConfigSetIntFunction>(kConfigSetIntAddress);
-	const auto flush =
-		reinterpret_cast<ConfigFlushFunction>(kConfigFlushAddress);
-	setInt(
-		configCache,
-		kConfigSection,
-		kConfigValue,
-		FovSetting::Clamp(fov),
-		engineIni);
-	flush(configCache, 0, engineIni);
-	return true;
-}
-
-int SelectedSliderFov(VideoSceneLayout* scene) {
-	if (!scene || !g_ui.Ready || g_ui.Scene != scene || !g_ui.Slider) return 0;
-	return FovSetting::FromSlider(GetSliderValue(g_ui.Slider));
-}
-
-void ApplySliderPreference(
+void ApplyFovPreference(
 	VideoSceneLayout* scene,
 	PlayerControllerLayout* controller,
 	int fov) {
 	if (fov == 0) return;
 	fov = FovSetting::Clamp(fov);
 	g_preferredFov = fov;
-	if (g_ui.Ready && g_ui.Scene == scene && g_ui.Label && g_ui.Slider &&
-		IsRegisteredObject(&g_ui.Label->Screen.Object) &&
-		IsRegisteredObject(&g_ui.Slider->Object.Screen.Object)) {
-		ConfigureSlider(g_ui.Slider);
-		SetSliderValue(g_ui.Slider, static_cast<float>(fov));
-		SetLabelText(g_ui.Label, fov);
+	if (g_ui.Ready && g_ui.Scene == scene &&
+		IsControlReady(g_ui.Fov, scene)) {
+		ConfigureSlider(
+			g_ui.Fov.Slider,
+			FovSetting::kDefaultFov,
+			FovSetting::kMaximumFov);
+		SetSliderValue(g_ui.Fov.Slider, static_cast<float>(fov));
+		SetFovLabelText(g_ui.Fov.Label, fov);
 	}
 
-	const bool saved = PersistPreference(fov);
+	const bool saved = PersistFovPreference(fov);
 	if (!saved) {
 		Logger::Log(
 			"clientpatch",
@@ -658,21 +748,63 @@ void ApplySliderPreference(
 #endif
 }
 
-void ResetSliderToRetailDefault(VideoSceneLayout* scene) {
-	if (!scene || !g_ui.Ready || g_ui.Scene != scene || !g_ui.Slider) return;
-	const float value = static_cast<float>(FovSetting::kDefaultFov);
-	ConfigureSlider(g_ui.Slider);
-	SetSliderValue(g_ui.Slider, value);
-	SetLabelText(g_ui.Label, FovSetting::kDefaultFov);
+void ApplyCombatTextPreference(VideoSceneLayout* scene, int percent) {
+	if (percent == 0) return;
+	percent = CombatTextScaleSetting::Clamp(percent);
+	ClientCombatTextScalePatch::ApplyScalePercent(percent);
+	if (g_ui.Ready && g_ui.Scene == scene &&
+		IsControlReady(g_ui.CombatText, scene)) {
+		ConfigureSlider(
+			g_ui.CombatText.Slider,
+			CombatTextScaleSetting::kMinimumPercent,
+			CombatTextScaleSetting::kMaximumPercent);
+		SetSliderValue(
+			g_ui.CombatText.Slider, static_cast<float>(percent));
+		SetCombatTextScalingLabelText(g_ui.CombatText.Label, percent);
+	}
 }
 
-void SyncLabelFromSlider(UiObjectLayout* sender) {
-	if (!g_ui.Ready || !g_ui.Label || !g_ui.Slider ||
-		sender != &g_ui.Slider->Object) {
-		return;
+void ResetSlidersToDefaults(VideoSceneLayout* scene) {
+	if (!scene || !g_ui.Ready || g_ui.Scene != scene) return;
+	if (IsControlReady(g_ui.Fov, scene)) {
+		ConfigureSlider(
+			g_ui.Fov.Slider,
+			FovSetting::kDefaultFov,
+			FovSetting::kMaximumFov);
+		SetSliderValue(
+			g_ui.Fov.Slider, static_cast<float>(FovSetting::kDefaultFov));
+		SetFovLabelText(g_ui.Fov.Label, FovSetting::kDefaultFov);
 	}
-	const int fov = FovSetting::FromSlider(GetSliderValue(g_ui.Slider));
-	SetLabelText(g_ui.Label, fov);
+	if (IsControlReady(g_ui.CombatText, scene)) {
+		ConfigureSlider(
+			g_ui.CombatText.Slider,
+			CombatTextScaleSetting::kMinimumPercent,
+			CombatTextScaleSetting::kMaximumPercent);
+		SetSliderValue(
+			g_ui.CombatText.Slider,
+			static_cast<float>(CombatTextScaleSetting::kDefaultPercent));
+		SetCombatTextScalingLabelText(
+			g_ui.CombatText.Label,
+			CombatTextScaleSetting::kDefaultPercent);
+	}
+}
+
+bool SyncLabelFromSlider(UiObjectLayout* sender) {
+	if (!g_ui.Ready || !sender) return false;
+	if (g_ui.Fov.Slider && sender == &g_ui.Fov.Slider->Object) {
+		const int fov =
+			FovSetting::FromSlider(GetSliderValue(g_ui.Fov.Slider));
+		SetFovLabelText(g_ui.Fov.Label, fov);
+		return true;
+	}
+	if (g_ui.CombatText.Slider &&
+		sender == &g_ui.CombatText.Slider->Object) {
+		const int percent = CombatTextScaleSetting::FromSlider(
+			GetSliderValue(g_ui.CombatText.Slider));
+		SetCombatTextScalingLabelText(g_ui.CombatText.Label, percent);
+		return true;
+	}
+	return false;
 }
 
 class VideoGammaSliderChangedHook : public HookBase<
@@ -685,11 +817,8 @@ public:
 		void* edx,
 		UiObjectLayout* sender,
 		int playerIndex) {
-		if (g_ui.Ready && g_ui.Scene == scene && g_ui.Slider &&
-			sender == &g_ui.Slider->Object) {
-			SyncLabelFromSlider(sender);
-			return;
-		}
+		if (g_ui.Ready && g_ui.Scene == scene &&
+			SyncLabelFromSlider(sender)) return;
 		m_original(scene, edx, sender, playerIndex);
 	}
 };
@@ -734,13 +863,18 @@ public:
 			eventParameters ? eventParameters->UiObjectReference : nullptr;
 		const bool apply = scene && target == scene->ApplyButton;
 		const bool reset = scene && target == scene->ResetButton;
-		const int selectedFov = apply ? SelectedSliderFov(scene) : 0;
+		const int selectedFov = apply ? SelectedFov(scene) : 0;
+		const int selectedCombatTextScale =
+			apply ? SelectedCombatTextScale(scene) : 0;
 		PlayerControllerLayout* controller =
 			apply ? ResolveGameplayController(scene) : nullptr;
 		const int handled = m_original(scene, edx, eventParameters);
 		if (handled && scene) {
-			if (apply) ApplySliderPreference(scene, controller, selectedFov);
-			if (reset) ResetSliderToRetailDefault(scene);
+			if (apply) {
+				ApplyFovPreference(scene, controller, selectedFov);
+				ApplyCombatTextPreference(scene, selectedCombatTextScale);
+			}
+			if (reset) ResetSlidersToDefaults(scene);
 		}
 		return handled;
 	}
@@ -780,32 +914,16 @@ public:
 }  // namespace
 
 void ClientFovSliderPatch::Initialize() {
-	const std::wstring configPath = ResolveConfigPath();
-	if (configPath.empty()) {
-		Logger::Log(
-			"clientpatch",
-			"[fov-slider] TgEngine.ini unavailable; saved preference not loaded\n");
-		return;
-	}
-
-	wchar_t value[16]{};
-	const DWORD length = GetPrivateProfileStringW(
-		kConfigSection,
-		kConfigValue,
-		L"",
-		value,
-		static_cast<DWORD>(sizeof(value) / sizeof(value[0])),
-		configPath.c_str());
-	if (length == 0) return;
-	wchar_t* end = nullptr;
-	const long parsed = std::wcstol(value, &end, 10);
-	if (end == value || !end || *end != L'\0') {
+	int savedFov = 0;
+	const EngineConfig::LoadIntResult result = EngineConfig::LoadInt(
+		kConfigSection, kFovConfigValue, &savedFov);
+	if (result == EngineConfig::LoadIntResult::Loaded) {
+		g_preferredFov = FovSetting::Clamp(savedFov);
+	} else if (result == EngineConfig::LoadIntResult::Invalid) {
 		Logger::Log(
 			"clientpatch",
 			"[fov-slider] invalid saved preference ignored\n");
-		return;
 	}
-	g_preferredFov = FovSetting::Clamp(static_cast<int>(parsed));
 }
 
 LONG ClientFovSliderPatch::Install() {

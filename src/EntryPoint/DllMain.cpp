@@ -4,6 +4,8 @@
 
 #include "src/ClientPatches/MorphRebuildPerformance/MorphRebuildPerformancePatch.hpp"
 #include "src/ClientPatches/ScopedWeaponVisibility/ScopedWeaponVisibilityPatch.hpp"
+#include "src/ClientPatches/UI/CombatTextScale/CombatTextScalePatch.hpp"
+#include "src/ClientPatches/UI/F2StatsScaling/F2StatsScalingPatch.hpp"
 #include "src/ClientPatches/UI/FovSlider/FovSliderPatch.hpp"
 #include "src/Handshake/FeatureHandshakePatch.hpp"
 #include "src/Utils/ClientLogDirectory/ClientLogDirectory.hpp"
@@ -85,6 +87,7 @@ DWORD WINAPI InstallHooks(LPVOID) {
 			static_cast<unsigned long long>(fingerprint.textHashPrefix));
 		return 0;
 	}
+	ClientCombatTextScalePatch::Initialize();
 	ClientFovSliderPatch::Initialize();
 	if (!RegisterClientFeatures()) {
 		Logger::Log(
@@ -107,6 +110,8 @@ DWORD WINAPI InstallHooks(LPVOID) {
 	result = ::DetourUpdateThread(::GetCurrentThread());
 	if (result == NO_ERROR) result = ClientMorphRebuildPerformancePatch::Install();
 	if (result == NO_ERROR) result = ClientScopedWeaponVisibilityPatch::Install();
+	if (result == NO_ERROR) result = ClientCombatTextScalePatch::Install();
+	if (result == NO_ERROR) result = ClientF2StatsScalingPatch::Install();
 	if (result == NO_ERROR) result = ClientFovSliderPatch::Install();
 	if (result == NO_ERROR) result = FeatureHandshakePatch::InstallIfNeeded();
 	if (result != NO_ERROR) {
@@ -129,7 +134,9 @@ DWORD WINAPI InstallHooks(LPVOID) {
 
 	Logger::Log(
 		"clientpatch",
-		"[ready] client patches installed: morph rebuild, scoped weapon visibility, FOV slider\n");
+		"[ready] client patches installed: morph rebuild, scoped weapon visibility, "
+		"FOV slider, combat text scaling, F2 stats scaling, "
+		"friendly name normalization\n");
 	return 0;
 }
 

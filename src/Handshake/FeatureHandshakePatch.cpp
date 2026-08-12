@@ -334,6 +334,7 @@ void DeliverDebugJoinSummary() {
 		chatManager,
 		L"[Client Patch DEBUG] Local client patches loaded: "
 		L"Morph Rebuild Performance; Scoped Weapon Visibility; "
+		L"Jetpack Aim Alignment; "
 		L"Field of View Slider; Combat Text Scaling; F2 Stats Scaling; "
 		L"Friendly Label Normalization.");
 

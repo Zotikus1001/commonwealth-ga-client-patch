@@ -38,6 +38,7 @@ SOURCES := \
 	src/Handshake/FeatureHandshakePatch.cpp \
 	src/ClientPatches/MorphRebuildPerformance/MorphRebuildPerformancePatch.cpp \
 	src/ClientPatches/ScopedWeaponVisibility/ScopedWeaponVisibilityPatch.cpp \
+	src/ClientPatches/Camera/JetpackAimAlignment/JetpackAimAlignmentPatch.cpp \
 	src/ClientPatches/UI/CombatTextScale/CombatTextScalePatch.cpp \
 	src/ClientPatches/UI/F2StatsScaling/F2StatsScalingPatch.cpp \
 	src/ClientPatches/UI/SpectatorNameplates/SpectatorNameplateDraw.cpp \

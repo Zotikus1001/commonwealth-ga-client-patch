@@ -9,6 +9,8 @@ A standalone 32-bit `dinput8.dll` proxy for the reviewed Global Agenda
   render-thread update copy before UE3 rebuilds the morph vertex buffer.
 - **Scoped weapon visibility** prevents the local in-hand weapon mesh from
   being shown and hidden again every tick while scoped.
+- **Jetpack aim alignment** keeps weapon aim synchronized with the player view
+  during sustained jetpack flight.
 - **Automatic F2 stats scaling** keeps the performance overlay readable above
   its 1080p baseline.
 - **Friendly overhead-label normalization** keeps player, agency, and alliance

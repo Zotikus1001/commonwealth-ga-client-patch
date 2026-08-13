@@ -10,14 +10,16 @@ OBJ_DIR := obj/clientpatch
 DEF_FILE := data/dinput8.def
 TEST_TARGET := out/tests/feature_registry_test
 NAMEPLATE_TEST_TARGET := out/tests/spectator_nameplate_format_test
+AUDIO_PERFORMANCE_TEST_TARGET := out/tests/audio_update_performance_test
 ifeq ($(OS),Windows_NT)
 TEST_TARGET := $(TEST_TARGET).exe
 NAMEPLATE_TEST_TARGET := $(NAMEPLATE_TEST_TARGET).exe
+AUDIO_PERFORMANCE_TEST_TARGET := $(AUDIO_PERFORMANCE_TEST_TARGET).exe
 HOST_CXX ?= $(CXX)
 else
 HOST_CXX ?= g++
 endif
-TEST_TARGETS := $(TEST_TARGET) $(NAMEPLATE_TEST_TARGET)
+TEST_TARGETS := $(TEST_TARGET) $(NAMEPLATE_TEST_TARGET) $(AUDIO_PERFORMANCE_TEST_TARGET)
 
 # Keep this list explicit: every compiled feature and infrastructure component
 # is visible during review, and no directory-wide wildcard can pull in code.
@@ -36,6 +38,7 @@ SOURCES := \
 	src/ClientRuntime/EngineFont.cpp \
 	src/Handshake/FeatureRegistry.cpp \
 	src/Handshake/FeatureHandshakePatch.cpp \
+	src/ClientPatches/PerformanceOptimizations/Audio/AudioUpdatePerformancePatch.cpp \
 	src/ClientPatches/MorphRebuildPerformance/MorphRebuildPerformancePatch.cpp \
 	src/ClientPatches/ScopedWeaponVisibility/ScopedWeaponVisibilityPatch.cpp \
 	src/ClientPatches/Camera/JetpackAimAlignment/JetpackAimAlignmentPatch.cpp \
@@ -123,6 +126,14 @@ $(NAMEPLATE_TEST_TARGET): \
 	@mkdir -p $(dir $@)
 	$(HOST_CXX) $(CPPFLAGS) $(TEST_CXXFLAGS) \
 		tests/spectator_nameplate_format_test.cpp \
+		-o $@
+
+$(AUDIO_PERFORMANCE_TEST_TARGET): \
+	tests/audio_update_performance_test.cpp \
+	src/ClientPatches/PerformanceOptimizations/Audio/AudioUpdatePolicy.hpp
+	@mkdir -p $(dir $@)
+	$(HOST_CXX) $(CPPFLAGS) $(TEST_CXXFLAGS) \
+		tests/audio_update_performance_test.cpp \
 		-o $@
 
 cleanclientpatch:

@@ -2,6 +2,7 @@
 
 #include "src/pch.hpp"
 
+#include "src/ClientPatches/PerformanceOptimizations/Audio/AudioUpdatePerformancePatch.hpp"
 #include "src/ClientPatches/MorphRebuildPerformance/MorphRebuildPerformancePatch.hpp"
 #include "src/ClientPatches/ScopedWeaponVisibility/ScopedWeaponVisibilityPatch.hpp"
 #include "src/ClientPatches/Camera/JetpackAimAlignment/JetpackAimAlignmentPatch.hpp"
@@ -51,12 +52,14 @@ bool InitializeRuntimeDiagnostics() {
 	if (!ClientLogDirectory::Initialize(logsRoot)) return false;
 
 	// Release retains only lifecycle/patch status and crash breadcrumbs. Debug
-	// additionally records the detailed morph/visibility profiling channel.
+	// additionally records detailed patch profiling channels.
 	Logger::EnableChannel("clientpatch");
 	Logger::EnableCrashChannel("clientpatch");
 #ifdef GA_CLIENT_DEBUG
 	Logger::EnableChannel("morphprofile");
 	Logger::EnableCrashChannel("morphprofile");
+	Logger::EnableChannel("audioprofile");
+	Logger::EnableCrashChannel("audioprofile");
 #endif
 
 	// Crash capture snapshots the same atomically published directory used by
@@ -110,6 +113,7 @@ DWORD WINAPI InstallHooks(LPVOID) {
 	}
 
 	result = ::DetourUpdateThread(::GetCurrentThread());
+	if (result == NO_ERROR) result = ClientAudioUpdatePerformancePatch::Install();
 	if (result == NO_ERROR) result = ClientMorphRebuildPerformancePatch::Install();
 	if (result == NO_ERROR) result = ClientScopedWeaponVisibilityPatch::Install();
 	if (result == NO_ERROR) result = ClientJetpackAimAlignmentPatch::Install();
@@ -138,9 +142,10 @@ DWORD WINAPI InstallHooks(LPVOID) {
 
 	Logger::Log(
 		"clientpatch",
-		"[ready] client patches installed: morph rebuild, scoped weapon visibility, "
-		"jetpack aim alignment, spectator nameplates, FOV slider, combat text "
-		"scaling, F2 stats scaling, friendly label normalization\n");
+		"[ready] client patches installed: audio performance, morph rebuild, "
+		"scoped weapon visibility, jetpack aim alignment, spectator nameplates, "
+		"FOV slider, combat text scaling, F2 stats scaling, friendly label "
+		"normalization\n");
 	return 0;
 }
 

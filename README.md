@@ -5,6 +5,8 @@ A standalone 32-bit `dinput8.dll` proxy for the reviewed Global Agenda
 
 ## Included client fixes
 
+- **Audio update optimization** bounds redundant game-thread source management
+  and temporarily reduces selected voices during sustained audio saturation.
 - **Morph rebuild optimization** removes zero-weight morph targets from the
   render-thread update copy before UE3 rebuilds the morph vertex buffer.
 - **Scoped weapon visibility** prevents the local in-hand weapon mesh from

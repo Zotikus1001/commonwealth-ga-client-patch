@@ -45,6 +45,9 @@ DEBUG logs a transition when the jetpack aim roll guard suppresses an
 inversion-class controller, shake, or retail view value, including all three
 raw roll components needed to identify the upstream trigger.
 
+DEBUG also logs replacement-font cache selections and transition-only
+invalidations with the owning UI surface, object slot, and rejection reason.
+
 After each instance join on a supported executable, a successfully installed
 debug build writes a local blue Instance-chat summary of loaded local fixes and
 every registered server-gated feature. Release builds do not show this

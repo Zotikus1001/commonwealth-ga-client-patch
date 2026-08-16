@@ -12,16 +12,18 @@ TEST_TARGET := out/tests/feature_registry_test
 NAMEPLATE_TEST_TARGET := out/tests/spectator_nameplate_format_test
 AUDIO_PERFORMANCE_TEST_TARGET := out/tests/audio_update_performance_test
 JETPACK_AIM_TEST_TARGET := out/tests/jetpack_aim_alignment_policy_test
+ENGINE_FONT_CACHE_TEST_TARGET := out/tests/engine_font_cache_policy_test
 ifeq ($(OS),Windows_NT)
 TEST_TARGET := $(TEST_TARGET).exe
 NAMEPLATE_TEST_TARGET := $(NAMEPLATE_TEST_TARGET).exe
 AUDIO_PERFORMANCE_TEST_TARGET := $(AUDIO_PERFORMANCE_TEST_TARGET).exe
 JETPACK_AIM_TEST_TARGET := $(JETPACK_AIM_TEST_TARGET).exe
+ENGINE_FONT_CACHE_TEST_TARGET := $(ENGINE_FONT_CACHE_TEST_TARGET).exe
 HOST_CXX ?= $(CXX)
 else
 HOST_CXX ?= g++
 endif
-TEST_TARGETS := $(TEST_TARGET) $(NAMEPLATE_TEST_TARGET) $(AUDIO_PERFORMANCE_TEST_TARGET) $(JETPACK_AIM_TEST_TARGET)
+TEST_TARGETS := $(TEST_TARGET) $(NAMEPLATE_TEST_TARGET) $(AUDIO_PERFORMANCE_TEST_TARGET) $(JETPACK_AIM_TEST_TARGET) $(ENGINE_FONT_CACHE_TEST_TARGET)
 
 # Keep this list explicit: every compiled feature and infrastructure component
 # is visible during review, and no directory-wide wildcard can pull in code.
@@ -144,6 +146,14 @@ $(JETPACK_AIM_TEST_TARGET): \
 	@mkdir -p $(dir $@)
 	$(HOST_CXX) $(CPPFLAGS) $(TEST_CXXFLAGS) \
 		tests/jetpack_aim_alignment_policy_test.cpp \
+		-o $@
+
+$(ENGINE_FONT_CACHE_TEST_TARGET): \
+	tests/engine_font_cache_policy_test.cpp \
+	src/ClientRuntime/EngineFontCachePolicy.hpp
+	@mkdir -p $(dir $@)
+	$(HOST_CXX) $(CPPFLAGS) $(TEST_CXXFLAGS) \
+		tests/engine_font_cache_policy_test.cpp \
 		-o $@
 
 cleanclientpatch:

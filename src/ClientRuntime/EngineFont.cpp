@@ -1,6 +1,10 @@
 #include "src/ClientRuntime/EngineFont.hpp"
 
+#include "src/ClientRuntime/EngineFontCachePolicy.hpp"
 #include "src/pch.hpp"
+#ifdef GA_CLIENT_DEBUG
+#include "src/Utils/Logger/Logger.hpp"
+#endif
 
 #include <cmath>
 #include <cstring>
@@ -67,6 +71,11 @@ static_assert(offsetof(FontLayout, characters) == 0x3c,
 static_assert(offsetof(FontLayout, isRemapped) == 0x90,
 	"Unexpected UFont remap flag offset");
 
+struct LoadedFontMatch {
+	void* font;
+	int objectIndex;
+};
+
 using FontCharacterOffsetFunction = int(__thiscall*)(void*, float);
 using FontResolutionScaleFunction =
 	float(__thiscall*)(void*, float);
@@ -110,29 +119,48 @@ bool NameInCandidates(
 	return false;
 }
 
+bool MatchesCandidateSet(
+	const UObject* object, const char* const* candidates,
+	std::size_t candidateCount, bool allowRegularFallback) {
+	return NameInCandidates(object, candidates, candidateCount) ||
+		(allowRegularFallback && NameInCandidates(
+			object, kRegularArialCandidates,
+			sizeof(kRegularArialCandidates) /
+				sizeof(kRegularArialCandidates[0])));
+}
+
 bool IsBold(const void* font) {
 	const char* const name = EngineFont::Name(font);
 	return name && std::strstr(name, "Bold") != nullptr;
+}
+
+bool HasRequiredFontMethods(void* font) {
+	if (!font) return false;
+	void** const vtable = *static_cast<void***>(font);
+	return vtable &&
+		vtable[kFontCharacterOffsetVtableOffset / sizeof(void*)] &&
+		vtable[kFontResolutionScaleVtableOffset / sizeof(void*)] &&
+		vtable[kFontMaximumHeightVtableOffset / sizeof(void*)];
 }
 
 bool TickReached(std::uint32_t now, std::uint32_t target) {
 	return static_cast<std::int32_t>(now - target) >= 0;
 }
 
-void* FindBestLoadedFont(
+LoadedFontMatch FindBestLoadedFont(
+	const TArray<UObject*>* objects,
 	const char* const* candidates, std::size_t candidateCount,
 	float viewportHeight, float sourceHeight, float targetHeight) {
-	const TArray<UObject*>* const objects = GlobalObjects();
-	if (!objects) return nullptr;
+	if (!objects) return {};
 
-	void* smallestSufficient = nullptr;
+	LoadedFontMatch smallestSufficient = {};
 	float smallestSufficientHeight = 0.0f;
-	void* largestImprovement = nullptr;
+	LoadedFontMatch largestImprovement = {};
 	float largestImprovementHeight = sourceHeight;
 	for (int index = 0; index < objects->Count; ++index) {
 		UObject* const object = objects->Data[index];
 		if (!NameInCandidates(object, candidates, candidateCount) ||
-			!IsFont(object)) {
+			!IsFont(object) || !HasRequiredFontMethods(object)) {
 			continue;
 		}
 
@@ -140,19 +168,48 @@ void* FindBestLoadedFont(
 			EngineFont::EffectiveHeight(object, viewportHeight);
 		if (!std::isfinite(height) || height <= sourceHeight) continue;
 		if (height > largestImprovementHeight) {
-			largestImprovement = object;
+			largestImprovement = {object, index};
 			largestImprovementHeight = height;
 		}
 		if (height >= targetHeight &&
-			(!smallestSufficient || height < smallestSufficientHeight)) {
-			smallestSufficient = object;
+			(!smallestSufficient.font || height < smallestSufficientHeight)) {
+			smallestSufficient = {object, index};
 			smallestSufficientHeight = height;
 		}
 	}
-	return smallestSufficient ? smallestSufficient : largestImprovement;
+	return smallestSufficient.font ? smallestSufficient : largestImprovement;
 }
 
+#ifdef GA_CLIENT_DEBUG
+const char* StatusName(EngineFontCachePolicy::Status status) {
+	switch (status) {
+	case EngineFontCachePolicy::Status::SourceChanged:
+		return "source-changed";
+	case EngineFontCachePolicy::Status::CandidateModeChanged:
+		return "candidate-mode-changed";
+	case EngineFontCachePolicy::Status::ObjectTableUnavailable:
+		return "object-table-unavailable";
+	case EngineFontCachePolicy::Status::IndexOutOfRange:
+		return "object-index-out-of-range";
+	case EngineFontCachePolicy::Status::SlotChanged:
+		return "object-slot-changed";
+	case EngineFontCachePolicy::Status::IdentityChanged:
+		return "font-identity-or-vtable-changed";
+	default:
+		return "unknown";
+	}
+}
+#endif
+
 }  // namespace
+
+EngineFont::LoadedFontCache::LoadedFontCache(const char* diagnosticName)
+#ifdef GA_CLIENT_DEBUG
+	: diagnosticName_(diagnosticName ? diagnosticName : "unnamed")
+#endif
+{
+	(void)diagnosticName;
+}
 
 void* EngineFont::LoadedFontCache::ResolveSharperArial(
 	void* sourceFont, float viewportHeight, float maximumVisualScale,
@@ -161,9 +218,61 @@ void* EngineFont::LoadedFontCache::ResolveSharperArial(
 		!std::isfinite(maximumVisualScale) || maximumVisualScale <= 1.0f) {
 		return nullptr;
 	}
-	if (void* const cached = font_.load(std::memory_order_acquire)) {
-		return cached;
+	const bool sourceIsBold = IsBold(sourceFont);
+	const bool bold = preferBold || sourceIsBold;
+	const bool allowRegularFallback = preferBold && !sourceIsBold;
+	const char* const* candidates = bold
+		? kBoldArialCandidates
+		: kRegularArialCandidates;
+	const std::size_t candidateCount = bold
+		? sizeof(kBoldArialCandidates) / sizeof(kBoldArialCandidates[0])
+		: sizeof(kRegularArialCandidates) / sizeof(kRegularArialCandidates[0]);
+	const TArray<UObject*>* const objects = GlobalObjects();
+	// UE3 keeps object-array indexes stable and clears or reuses their slots when
+	// packages unload. Confirm the slot before dereferencing a cached UObject;
+	// allocator contents at the old address are no longer an object contract.
+	const EngineFontCachePolicy::Entry cached = {
+		font_.load(std::memory_order_acquire),
+		sourceFont_.load(std::memory_order_relaxed),
+		objectIndex_.load(std::memory_order_relaxed),
+		bold_.load(std::memory_order_relaxed),
+	};
+	EngineFontCachePolicy::Status status = EngineFontCachePolicy::Validate(
+		cached, sourceFont, bold,
+		objects ? objects->Data : nullptr,
+		objects ? objects->Count : -1);
+	if (status == EngineFontCachePolicy::Status::Valid) {
+		auto* const object = static_cast<UObject*>(cached.font);
+		if (MatchesCandidateSet(
+				object, candidates, candidateCount, allowRegularFallback) &&
+			IsFont(object) && HasRequiredFontMethods(object)) {
+			return cached.font;
+		}
+		status = EngineFontCachePolicy::Status::IdentityChanged;
 	}
+	if (status != EngineFontCachePolicy::Status::Empty) {
+		void* expected = cached.font;
+		if (font_.compare_exchange_strong(
+			expected, nullptr,
+			std::memory_order_acq_rel, std::memory_order_acquire)) {
+			nextLookupTick_.store(0, std::memory_order_release);
+#ifdef GA_CLIENT_DEBUG
+			void* currentSlot = nullptr;
+			if (objects && cached.objectIndex >= 0 &&
+				cached.objectIndex < objects->Count) {
+				currentSlot = objects->Data[cached.objectIndex];
+			}
+			Logger::Log(
+				"clientpatch",
+				"[font-cache] %s invalidated: reason=%s source=%p "
+				"cached-source=%p font=%p object-index=%d slot=%p\n",
+				diagnosticName_, StatusName(status), sourceFont,
+				cached.sourceFont, cached.font, cached.objectIndex,
+				currentSlot);
+#endif
+		}
+	}
+	if (!objects) return nullptr;
 
 	const std::uint32_t now = ::GetTickCount();
 	std::uint32_t next = nextLookupTick_.load(std::memory_order_relaxed);
@@ -177,27 +286,32 @@ void* EngineFont::LoadedFontCache::ResolveSharperArial(
 	const float sourceHeight = EffectiveHeight(sourceFont, viewportHeight);
 	if (!std::isfinite(sourceHeight) || sourceHeight <= 0.0f) return nullptr;
 	const float targetHeight = sourceHeight * maximumVisualScale;
-	const bool sourceIsBold = IsBold(sourceFont);
-	const bool bold = preferBold || sourceIsBold;
-	const char* const* candidates = bold
-		? kBoldArialCandidates
-		: kRegularArialCandidates;
-	const std::size_t candidateCount = bold
-		? sizeof(kBoldArialCandidates) / sizeof(kBoldArialCandidates[0])
-		: sizeof(kRegularArialCandidates) / sizeof(kRegularArialCandidates[0]);
-	void* replacement = FindBestLoadedFont(
-		candidates, candidateCount, viewportHeight, sourceHeight, targetHeight);
-	if (!replacement && preferBold && !sourceIsBold) {
+	LoadedFontMatch replacement = FindBestLoadedFont(
+		objects, candidates, candidateCount,
+		viewportHeight, sourceHeight, targetHeight);
+	if (!replacement.font && allowRegularFallback) {
 		replacement = FindBestLoadedFont(
+			objects,
 			kRegularArialCandidates,
 			sizeof(kRegularArialCandidates) /
 				sizeof(kRegularArialCandidates[0]),
 			viewportHeight, sourceHeight, targetHeight);
 	}
-	if (replacement) {
-		font_.store(replacement, std::memory_order_release);
+	if (replacement.font) {
+		sourceFont_.store(sourceFont, std::memory_order_relaxed);
+		objectIndex_.store(replacement.objectIndex, std::memory_order_relaxed);
+		bold_.store(bold, std::memory_order_relaxed);
+		font_.store(replacement.font, std::memory_order_release);
+#ifdef GA_CLIENT_DEBUG
+		Logger::Log(
+			"clientpatch",
+			"[font-cache] %s selected: source=%p font=%p "
+			"object-index=%d mode=%s\n",
+			diagnosticName_, sourceFont, replacement.font,
+			replacement.objectIndex, bold ? "bold" : "regular");
+#endif
 	}
-	return replacement;
+	return replacement.font;
 }
 
 const char* EngineFont::Name(const void* font) {

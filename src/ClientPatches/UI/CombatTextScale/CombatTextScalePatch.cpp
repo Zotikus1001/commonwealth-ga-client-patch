@@ -146,9 +146,9 @@ std::atomic<int> g_scalePercent{
 	CombatTextScaleSetting::kDefaultPercent};
 std::atomic<int> g_reticuleHealth{-1};
 std::atomic<int> g_reticuleEnergy{-1};
-EngineFont::LoadedFontCache g_combatFontCache;
-EngineFont::LoadedFontCache g_reticuleFontCache;
-EngineFont::LoadedFontCache g_reticuleWarningFontCache;
+EngineFont::LoadedFontCache g_combatFontCache{"combat-popups"};
+EngineFont::LoadedFontCache g_reticuleFontCache{"reticule-pools"};
+EngineFont::LoadedFontCache g_reticuleWarningFontCache{"reticule-warnings"};
 #ifdef GA_CLIENT_DEBUG
 std::atomic_flag g_loggedHealthScale = ATOMIC_FLAG_INIT;
 std::atomic_flag g_loggedEnergyScale = ATOMIC_FLAG_INIT;

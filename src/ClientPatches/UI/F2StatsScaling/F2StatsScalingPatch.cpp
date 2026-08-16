@@ -40,7 +40,7 @@ F2StatsFunction g_f2Stats =
 F2TextFunction g_f2Text =
 	reinterpret_cast<F2TextFunction>(kF2TextAddress);
 thread_local F2Context g_f2Context = {};
-EngineFont::LoadedFontCache g_f2FontCache;
+EngineFont::LoadedFontCache g_f2FontCache{"F2-stats"};
 
 #ifdef GA_CLIENT_DEBUG
 std::atomic<int> g_loggedVerticalResolution{-1};

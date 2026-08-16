@@ -1,18 +1,18 @@
 #pragma once
 
+#include "src/ClientPatches/Camera/JetpackAimAlignment/JetpackAimAlignmentPolicy.hpp"
 #include "src/pch.hpp"
 #include "src/Utils/HookBase.hpp"
 
 struct JetpackAimControllerLayout;
 struct JetpackAimVector;
-struct JetpackAimRotator;
 
 class ClientJetpackAimAlignmentPatch : public HookBase<
 	void(__fastcall*)(
 		JetpackAimControllerLayout*,
 		void*,
 		JetpackAimVector*,
-		JetpackAimRotator*),
+		ClientJetpackAimAlignment::Rotator*),
 	0x109692C0u,
 	ClientJetpackAimAlignmentPatch> {
 public:
@@ -20,5 +20,5 @@ public:
 		JetpackAimControllerLayout* controller,
 		void* edx,
 		JetpackAimVector* outLocation,
-		JetpackAimRotator* outRotation);
+		ClientJetpackAimAlignment::Rotator* outRotation);
 };

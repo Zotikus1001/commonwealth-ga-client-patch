@@ -1,29 +1,33 @@
 #include "src/ClientPatches/Camera/JetpackAimAlignment/JetpackAimAlignmentPatch.hpp"
 
+#ifdef GA_CLIENT_DEBUG
+#include <atomic>
+
+#include "src/Utils/Logger/Logger.hpp"
+#endif
+
 struct JetpackAimVector {
 	float X;
 	float Y;
 	float Z;
 };
 
-struct JetpackAimRotator {
-	std::int32_t Pitch;
-	std::int32_t Yaw;
-	std::int32_t Roll;
-};
+using ClientJetpackAimAlignment::CorrectedViewRotation;
+using ClientJetpackAimAlignment::IsInversionRisk;
+using ClientJetpackAimAlignment::Rotator;
 
 struct JetpackAimControllerLayout {
 	std::uint8_t unknown00[0x60];
-	JetpackAimRotator Rotation;
+	Rotator Rotation;
 	std::uint8_t unknown6C[0x388 - 0x6C];
 	void* Pawn;
 	std::uint8_t unknown38C[0x720 - 0x38C];
-	JetpackAimRotator ShakeRotation;
+	Rotator ShakeRotation;
 };
 
 static_assert(sizeof(JetpackAimVector) == 0x0C,
 	"Unexpected FVector layout");
-static_assert(sizeof(JetpackAimRotator) == 0x0C,
+static_assert(sizeof(Rotator) == 0x0C,
 	"Unexpected FRotator layout");
 static_assert(offsetof(JetpackAimControllerLayout, Rotation) == 0x60,
 	"Unexpected AActor::Rotation offset");
@@ -51,14 +55,42 @@ bool IsPlayerJetting(const JetpackAimControllerLayout* controller) {
 	return name && std::strcmp(name, kPlayerJettingState) == 0;
 }
 
-std::int32_t AddRotatorComponents(std::int32_t lhs, std::int32_t rhs) {
-	const std::uint32_t wrapped =
-		(static_cast<std::uint32_t>(lhs) +
-		 static_cast<std::uint32_t>(rhs)) & 0xFFFFu;
-	return wrapped > 0x7FFFu
-		? static_cast<std::int32_t>(wrapped) - 0x10000
-		: static_cast<std::int32_t>(wrapped);
+#ifdef GA_CLIENT_DEBUG
+std::atomic<bool> g_rollGuardActive{false};
+
+void LogRollGuard(
+	const Rotator& controllerRotation,
+	const Rotator& shakeRotation,
+	const Rotator& retailRotation) {
+	const bool inversionRisk = IsInversionRisk(controllerRotation.Roll) ||
+		IsInversionRisk(shakeRotation.Roll) ||
+		IsInversionRisk(retailRotation.Roll);
+	if (g_rollGuardActive.exchange(
+			inversionRisk, std::memory_order_relaxed) == inversionRisk) {
+		return;
+	}
+	if (inversionRisk) {
+		Logger::Log(
+			"clientpatch",
+			"[jetpack-aim] blocked inversion-class roll: "
+			"controller=%d shake=%d retail=%d corrected=0\n",
+			controllerRotation.Roll,
+			shakeRotation.Roll,
+			retailRotation.Roll);
+	} else {
+		Logger::Log(
+			"clientpatch",
+			"[jetpack-aim] inversion-class roll cleared\n");
+	}
 }
+
+void ClearRollGuardLogState() {
+	if (!g_rollGuardActive.exchange(false, std::memory_order_relaxed)) return;
+	Logger::Log(
+		"clientpatch",
+		"[jetpack-aim] inversion-class roll cleared after PlayerJetting\n");
+}
+#endif
 
 }  // namespace
 
@@ -66,19 +98,25 @@ void __fastcall ClientJetpackAimAlignmentPatch::Call(
 	JetpackAimControllerLayout* controller,
 	void* edx,
 	JetpackAimVector* outLocation,
-	JetpackAimRotator* outRotation) {
+	Rotator* outRotation) {
 	const bool alignAim = IsPlayerJetting(controller);
 	m_original(controller, edx, outLocation, outRotation);
 
+#ifdef GA_CLIENT_DEBUG
+	if (!alignAim) ClearRollGuardLogState();
+#endif
 	if (!alignAim || !outRotation) return;
 
 	// PlayerJetting can return stale script-owned camera offsets even while
-	// Controller.Rotation tracks the visible view. Replace only the rotation
-	// consumed by pawn aim; preserve retail camera position and shake.
-	outRotation->Pitch = AddRotatorComponents(
-		controller->Rotation.Pitch, controller->ShakeRotation.Pitch);
-	outRotation->Yaw = AddRotatorComponents(
-		controller->Rotation.Yaw, controller->ShakeRotation.Yaw);
-	outRotation->Roll = AddRotatorComponents(
-		controller->Rotation.Roll, controller->ShakeRotation.Roll);
+	// Controller.Rotation tracks visible pitch and yaw. Replace only the
+	// rotation consumed by pawn aim; preserve retail camera position.
+#ifdef GA_CLIENT_DEBUG
+	const Rotator retailRotation = *outRotation;
+#endif
+	*outRotation = CorrectedViewRotation(
+		controller->Rotation, controller->ShakeRotation);
+#ifdef GA_CLIENT_DEBUG
+	LogRollGuard(
+		controller->Rotation, controller->ShakeRotation, retailRotation);
+#endif
 }

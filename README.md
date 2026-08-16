@@ -12,7 +12,7 @@ A standalone 32-bit `dinput8.dll` proxy for the reviewed Global Agenda
 - **Scoped weapon visibility** prevents the local in-hand weapon mesh from
   being shown and hidden again every tick while scoped.
 - **Jetpack aim alignment** keeps weapon aim synchronized with the player view
-  during sustained jetpack flight.
+  during sustained jetpack flight without allowing view roll to invert it.
 - **Automatic F2 stats scaling** keeps the performance overlay readable above
   its 1080p baseline.
 - **Friendly overhead-label normalization** keeps player, agency, and alliance
@@ -40,6 +40,10 @@ Run `windows-server-menu.bat`. Its only build choices are:
 
 1. Debug: symbols and detailed patch profiling.
 2. Release: optimized and stripped, retaining patch-status and crash logging.
+
+DEBUG logs a transition when the jetpack aim roll guard suppresses an
+inversion-class controller, shake, or retail view value, including all three
+raw roll components needed to identify the upstream trigger.
 
 After each instance join on a supported executable, a successfully installed
 debug build writes a local blue Instance-chat summary of loaded local fixes and
@@ -75,7 +79,7 @@ out/clientpatch/dinput8.dll
 The Windows menu and shell builder pass Make the number of processors
 available to the current process; neither uses a fixed parallel-job count.
 
-Run the platform-neutral registry test with `make test`.
+Run the platform-neutral host test suite with `make test`.
 
 ## Opt-in server feature gate
 

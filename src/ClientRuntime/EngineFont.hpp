@@ -1,5 +1,8 @@
 #pragma once
 
+#include "src/ClientRuntime/EngineFontCachePolicy.hpp"
+
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -15,11 +18,16 @@ public:
 		bool preferBold = false);
 
 private:
-	std::atomic<void*> font_{nullptr};
-	std::atomic<void*> sourceFont_{nullptr};
-	std::atomic<int> objectIndex_{-1};
-	std::atomic<bool> bold_{false};
-	std::atomic<std::uint32_t> nextLookupTick_{0};
+	struct Slot {
+		std::atomic<void*> font{nullptr};
+		std::atomic<void*> sourceFont{nullptr};
+		std::atomic<int> objectIndex{-1};
+		std::atomic<bool> bold{false};
+	};
+
+	std::array<Slot, EngineFontCachePolicy::kEntryCapacity> entries_{};
+	std::atomic<std::uint32_t> nextScanTick_{0};
+	std::atomic<std::uint32_t> nextVictim_{0};
 #ifdef GA_CLIENT_DEBUG
 	const char* diagnosticName_;
 #endif

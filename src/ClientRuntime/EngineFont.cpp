@@ -143,10 +143,6 @@ bool HasRequiredFontMethods(void* font) {
 		vtable[kFontMaximumHeightVtableOffset / sizeof(void*)];
 }
 
-bool TickReached(std::uint32_t now, std::uint32_t target) {
-	return static_cast<std::int32_t>(now - target) >= 0;
-}
-
 LoadedFontMatch FindBestLoadedFont(
 	const TArray<UObject*>* objects,
 	const char* const* candidates, std::size_t candidateCount,
@@ -228,34 +224,41 @@ void* EngineFont::LoadedFontCache::ResolveSharperArial(
 		? sizeof(kBoldArialCandidates) / sizeof(kBoldArialCandidates[0])
 		: sizeof(kRegularArialCandidates) / sizeof(kRegularArialCandidates[0]);
 	const TArray<UObject*>* const objects = GlobalObjects();
-	// UE3 keeps object-array indexes stable and clears or reuses their slots when
-	// packages unload. Confirm the slot before dereferencing a cached UObject;
-	// allocator contents at the old address are no longer an object contract.
-	const EngineFontCachePolicy::Entry cached = {
-		font_.load(std::memory_order_acquire),
-		sourceFont_.load(std::memory_order_relaxed),
-		objectIndex_.load(std::memory_order_relaxed),
-		bold_.load(std::memory_order_relaxed),
-	};
-	EngineFontCachePolicy::Status status = EngineFontCachePolicy::Validate(
-		cached, sourceFont, bold,
-		objects ? objects->Data : nullptr,
-		objects ? objects->Count : -1);
-	if (status == EngineFontCachePolicy::Status::Valid) {
-		auto* const object = static_cast<UObject*>(cached.font);
-		if (MatchesCandidateSet(
-				object, candidates, candidateCount, allowRegularFallback) &&
-			IsFont(object) && HasRequiredFontMethods(object)) {
-			return cached.font;
+	std::size_t matchingIndex = entries_.size();
+	for (std::size_t index = 0; index < entries_.size(); ++index) {
+		Slot& slot = entries_[index];
+		// UE3 clears or reuses an unloaded object's stable array slot. Load the
+		// published pointer first, then validate that slot before dereferencing it.
+		const EngineFontCachePolicy::Entry cached = {
+			slot.font.load(std::memory_order_acquire),
+			slot.sourceFont.load(std::memory_order_relaxed),
+			slot.objectIndex.load(std::memory_order_relaxed),
+			slot.bold.load(std::memory_order_relaxed),
+		};
+		if (!EngineFontCachePolicy::KeyMatches(cached, sourceFont, bold)) {
+			continue;
 		}
-		status = EngineFontCachePolicy::Status::IdentityChanged;
-	}
-	if (status != EngineFontCachePolicy::Status::Empty) {
+		if (matchingIndex == entries_.size()) matchingIndex = index;
+		if (!cached.font) continue;
+
+		EngineFontCachePolicy::Status status = EngineFontCachePolicy::Validate(
+			cached, sourceFont, bold,
+			objects ? objects->Data : nullptr,
+			objects ? objects->Count : -1);
+		if (status == EngineFontCachePolicy::Status::Valid) {
+			auto* const object = static_cast<UObject*>(cached.font);
+			if (MatchesCandidateSet(
+					object, candidates, candidateCount, allowRegularFallback) &&
+				IsFont(object) && HasRequiredFontMethods(object)) {
+				return cached.font;
+			}
+			status = EngineFontCachePolicy::Status::IdentityChanged;
+		}
+
 		void* expected = cached.font;
-		if (font_.compare_exchange_strong(
-			expected, nullptr,
-			std::memory_order_acq_rel, std::memory_order_acquire)) {
-			nextLookupTick_.store(0, std::memory_order_release);
+		if (slot.font.compare_exchange_strong(
+				expected, nullptr,
+				std::memory_order_acq_rel, std::memory_order_acquire)) {
 #ifdef GA_CLIENT_DEBUG
 			void* currentSlot = nullptr;
 			if (objects && cached.objectIndex >= 0 &&
@@ -264,9 +267,10 @@ void* EngineFont::LoadedFontCache::ResolveSharperArial(
 			}
 			Logger::Log(
 				"clientpatch",
-				"[font-cache] %s invalidated: reason=%s source=%p "
+				"[font-cache] %s invalidated: cache-slot=%u reason=%s source=%p "
 				"cached-source=%p font=%p object-index=%d slot=%p\n",
-				diagnosticName_, StatusName(status), sourceFont,
+				diagnosticName_, static_cast<unsigned>(index),
+				StatusName(status), sourceFont,
 				cached.sourceFont, cached.font, cached.objectIndex,
 				currentSlot);
 #endif
@@ -275,11 +279,10 @@ void* EngineFont::LoadedFontCache::ResolveSharperArial(
 	if (!objects) return nullptr;
 
 	const std::uint32_t now = ::GetTickCount();
-	std::uint32_t next = nextLookupTick_.load(std::memory_order_relaxed);
-	if (!TickReached(now, next) ||
-		!nextLookupTick_.compare_exchange_strong(
-			next, now + kLookupRetryMilliseconds,
-			std::memory_order_acq_rel, std::memory_order_relaxed)) {
+	// One cache-wide reservation bounds full UObject scans even if a caller
+	// presents more distinct source fonts than the fixed keyed cache can retain.
+	if (!EngineFontCachePolicy::TryReserveScan(
+			nextScanTick_, now, kLookupRetryMilliseconds)) {
 		return nullptr;
 	}
 
@@ -298,17 +301,36 @@ void* EngineFont::LoadedFontCache::ResolveSharperArial(
 			viewportHeight, sourceHeight, targetHeight);
 	}
 	if (replacement.font) {
-		sourceFont_.store(sourceFont, std::memory_order_relaxed);
-		objectIndex_.store(replacement.objectIndex, std::memory_order_relaxed);
-		bold_.store(bold, std::memory_order_relaxed);
-		font_.store(replacement.font, std::memory_order_release);
+		std::array<EngineFontCachePolicy::Entry,
+			EngineFontCachePolicy::kEntryCapacity> cachedEntries{};
+		for (std::size_t index = 0; index < entries_.size(); ++index) {
+			cachedEntries[index] = {
+				entries_[index].font.load(std::memory_order_acquire),
+				entries_[index].sourceFont.load(std::memory_order_relaxed),
+				entries_[index].objectIndex.load(std::memory_order_relaxed),
+				entries_[index].bold.load(std::memory_order_relaxed),
+			};
+		}
+		const std::size_t targetIndex = matchingIndex < entries_.size()
+			? matchingIndex
+			: EngineFontCachePolicy::ChooseStorageIndex(
+				cachedEntries.data(), cachedEntries.size(),
+				nextVictim_.fetch_add(1, std::memory_order_relaxed));
+		Slot& target = entries_[targetIndex];
+		target.font.store(nullptr, std::memory_order_release);
+		target.sourceFont.store(sourceFont, std::memory_order_relaxed);
+		target.objectIndex.store(
+			replacement.objectIndex, std::memory_order_relaxed);
+		target.bold.store(bold, std::memory_order_relaxed);
+		target.font.store(replacement.font, std::memory_order_release);
 #ifdef GA_CLIENT_DEBUG
 		Logger::Log(
 			"clientpatch",
 			"[font-cache] %s selected: source=%p font=%p "
-			"object-index=%d mode=%s\n",
+			"object-index=%d mode=%s cache-slot=%u\n",
 			diagnosticName_, sourceFont, replacement.font,
-			replacement.objectIndex, bold ? "bold" : "regular");
+			replacement.objectIndex, bold ? "bold" : "regular",
+			static_cast<unsigned>(targetIndex));
 #endif
 	}
 	return replacement.font;

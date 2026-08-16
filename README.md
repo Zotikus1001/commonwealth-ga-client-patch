@@ -1,62 +1,44 @@
 # Commonwealth Global Agenda Client Patch
 
-A standalone 32-bit `dinput8.dll` proxy for the reviewed Global Agenda
-1.5.1.5 retail client.
+A 32-bit `dinput8.dll` proxy for the reviewed Global Agenda 1.5.1.5 retail
+client. It forwards the normal DirectInput exports and applies local client
+fixes after verifying the executable. Unsupported executables continue without
+installing hooks.
 
-## Included client fixes
+All bundled changes are client-side and require no server support.
 
-- **Audio update optimization** bounds redundant game-thread source management
-  and temporarily reduces selected voices during sustained audio saturation.
-- **Morph rebuild optimization** removes zero-weight morph targets from the
-  render-thread update copy before UE3 rebuilds the morph vertex buffer.
+## Included changes
+
+### Bug fixes
+
+- **Audio update optimization** bounds redundant source management and reduces
+  selected voices during sustained audio saturation.
+- **Morph rebuild optimization** removes zero-weight morph targets before UE3
+  rebuilds morph vertex buffers.
 - **Scoped weapon visibility** prevents the local in-hand weapon mesh from
-  being shown and hidden again every tick while scoped.
-- **Jetpack aim alignment** keeps weapon aim synchronized with the player view
-  during sustained jetpack flight without allowing view roll to invert it.
+  being redundantly hidden and shown while scoped.
+- **Jetpack aim alignment** keeps weapon aim aligned with the player view and
+  rejects inversion-class view roll during flight.
 - **Automatic F2 stats scaling** keeps the performance overlay readable above
   its 1080p baseline.
 - **Friendly overhead-label normalization** keeps player, agency, and alliance
-  text scaled together above 1080p without changing 1080p rendering.
+  labels proportional above 1080p.
 
-## Included client features
+### Features
 
-- **Field of view slider** in the in-game Video settings.
-- **Combat Text Scaling slider** in the in-game Video settings.
-- **Spectator nameplates** show player names, team colors, and health above
-  live players while spectating.
+- **Field of view slider** in the Video settings.
+- **Combat Text Scaling slider** in the Video settings.
+- **Spectator nameplates** show names, team colors, and health above live
+  players while spectating.
 
-These changes are local-only. They install without a cooperating server and are
-not registered with the feature gate.
-
-The DLL verifies the executable PE timestamp, image size, preferred and runtime
-image base, and complete SHA-256 digest of its `.text` section before attaching
-any hook. An unsupported executable is logged and otherwise left untouched.
-
-## Build
+## Building
 
 ### Windows
 
-Run `windows-server-menu.bat`. Its only build choices are:
+Run `windows-server-menu.bat` and choose the Debug or Release build. The script
+can install MSYS2 and the required 32-bit MinGW compiler when they are missing.
 
-1. Debug: symbols and detailed patch profiling.
-2. Release: optimized and stripped, retaining patch-status and crash logging.
-
-DEBUG logs a transition when the jetpack aim roll guard suppresses an
-inversion-class controller, shake, or retail view value, including all three
-raw roll components needed to identify the upstream trigger.
-
-DEBUG also logs replacement-font cache selections and transition-only
-invalidations with the owning UI surface, object slot, and rejection reason.
-
-After each instance join on a supported executable, a successfully installed
-debug build writes a local blue Instance-chat summary of loaded local fixes and
-every registered server-gated feature. Release builds do not show this
-diagnostic.
-
-The menu installs MSYS2 and the 32-bit MinGW compiler through
-`winget`/`pacman` if needed.
-
-### Linux
+### Linux or MSYS2
 
 Install GNU Make, a native C++ compiler for tests, and the 32-bit MinGW-w64
 cross-compiler. On Debian or Ubuntu:
@@ -65,87 +47,49 @@ cross-compiler. On Debian or Ubuntu:
 sudo apt install make g++ g++-mingw-w64-i686
 ```
 
-Then run either:
+Build with one of these commands:
 
 ```bash
 bash build-client-patch.sh debug
 bash build-client-patch.sh release
+bash build-client-patch.sh package-release
 ```
 
-The equivalent direct Make targets are `make debug` and `make release`.
-Both platforms produce:
+The equivalent Make targets are `make debug`, `make release`, and
+`make package-release`. The client DLL is written to
+`out/clientpatch/dinput8.dll`; the packaged release is written to
+`out/distribution/Commonwealth-GA-Client-Patches-x86.dll`.
 
-```text
-out/clientpatch/dinput8.dll
+Run the host test suite with:
+
+```bash
+make test
 ```
 
-The Windows menu and shell builder pass Make the number of processors
-available to the current process; neither uses a fixed parallel-job count.
+## Server-gated feature integration
 
-Run the platform-neutral host test suite with `make test`.
+The repository includes a one-way compatibility gate for future features that
+need server cooperation. No bundled change currently uses it.
 
-## Opt-in server feature gate
+The server sends a token through the stock reliable
+`APlayerController::ClientCapBandwidth(int)` RPC. The token contains the magic
+byte `0x6D`, a stable nonzero feature ID, and a nonzero compatibility release.
+The client activates only an exact registered match and resets activation on
+travel. The protocol sends no client response, heartbeat, or probe.
 
-Future client features can require an exact server-advertised release. This is
-a one-way activation gate, not a challenge/response authentication protocol:
+### Client
 
-```text
-31          24 23          16 15                         0
-+--------------+--------------+----------------------------+
-| magic 0x6D   | feature ID   | exact feature release      |
-+--------------+--------------+----------------------------+
-```
-
-- Feature ID is an assigned nonzero 8-bit value.
-- Feature release is a nonzero 16-bit value.
-- The server sends the token once through
-  `APlayerController::ClientCapBandwidth(int)` after login or instance join,
-  and only when that server feature is enabled.
-- The client attempts activation only for a registered feature with the same
-  ID and exact release. A failed activation callback leaves it inactive.
-- While the handshake hook is attached, unknown IDs are consumed and ignored.
-- A registered feature with a different release is disabled, including after
-  an earlier matching advertisement, and produces one local Instance-channel
-  blue message telling the player to update the client patch. Repeated
-  mismatched tokens do not repeat the message.
-- Client travel or a new `ReceivedPlayer` event deactivates negotiated
-  features and resets mismatch notices. The next instance must advertise them
-  again.
-- There is no response, heartbeat, probe, or recurring packet.
-
-DEBUG always attaches the handshake hook for its join diagnostics. Release
-attaches it only when at least one server-gated feature is registered. A
-release built with an empty registry therefore does not intercept feature
-tokens. Before deploying an advertisement, ensure the supported client
-population is running a release that installs the handshake hook.
-
-In a debug build, the join summary waits two seconds after `ReceivedPlayer` so
-the one-time advertisements can arrive. It reports each registered feature as
-active, activation failed, release mismatched, or not advertised. “Not
-advertised” means the client cannot distinguish a disabled server feature from
-a server that does not provide it. This delay is local UI bookkeeping checked
-from existing game-thread events; it sends no traffic and runs no timer thread.
-If an advertisement arrives later, the debug build prints a corrected feature
-status line. Repeated advertisements do not repeat that line unless the
-feature state or advertised release changed.
-
-`ClientCapBandwidth` is a reliable stock RPC. Send only after the new player
-controller/session is ready; sending again after an instance transition is
-required, while periodic resends within one instance are not.
-
-### Client integration
-
-Assign a stable ID and release, then register the feature in
-`src/Handshake/ClientFeatureRegistry.cpp`:
+Register the feature in `src/Handshake/ClientFeatureRegistry.cpp` and propagate
+registration failure:
 
 ```cpp
 #include "src/Handshake/FeatureRegistry.hpp"
 
 namespace {
-constexpr ClientFeatureMagic::FeatureId kSpectatorId = 1;
-constexpr ClientFeatureMagic::FeatureRelease kSpectatorRelease = 1;
+constexpr ClientFeatureMagic::FeatureId kFeatureId = 1;
+constexpr ClientFeatureMagic::FeatureRelease kFeatureRelease = 1;
 
-bool SetSpectatorAvailable(bool active) {
+bool SetFeatureAvailable(bool active) {
 	// Enable or disable only this feature's runtime state.
 	return true;
 }
@@ -153,48 +97,32 @@ bool SetSpectatorAvailable(bool active) {
 
 bool RegisterClientFeatures() {
 	return ClientFeatureHandshake::Register({
-		kSpectatorId,
-		kSpectatorRelease,
-		"spectator",
-		&SetSpectatorAvailable,
+		kFeatureId,
+		kFeatureRelease,
+		"feature-name",
+		&SetFeatureAvailable,
 	});
 }
 ```
 
-Feature IDs and releases must be nonzero. Registration names must use static
-storage and contain 1–64 printable ASCII characters. The fixed registry holds
-at most 32 features, and `RegisterClientFeatures()` must return false if any
-registration fails.
+Keep the feature inert unless
+`ClientFeatureHandshake::IsActive(kFeatureId)` is true. Release builds install
+the carrier hook only when the registry contains at least one feature, so the
+registration must ship before the server advertises it.
 
-If the feature needs a hook, attach that hook in the normal startup Detours
-transaction, but make its body pass straight through while
-`ClientFeatureHandshake::IsActive(kSpectatorId)` is false. Do not make the
-feature useful before activation.
+### Server
 
-### Server integration
-
-Mirror or vendor `src/Handshake/FeatureMagic.hpp` into the server source and
-send the matching token only when the server-side feature is enabled:
+Mirror or vendor `src/Handshake/FeatureMagic.hpp`, then advertise the matching
+token after login and after every instance join:
 
 ```cpp
-constexpr std::uint8_t kSpectatorId = 1;
-constexpr std::uint16_t kSpectatorRelease = 1;
-
 playerController->ClientCapBandwidth(
-	ClientFeatureMagic::MakeToken(kSpectatorId, kSpectatorRelease));
+	ClientFeatureMagic::MakeToken(kFeatureId, kFeatureRelease));
 ```
 
-Send it after initial login and after each instance join. Never reuse a feature
-ID for a different feature. Bump the feature release whenever the client and
-server behavior or data contract becomes incompatible.
+Never reuse an ID for an unrelated feature. Bump the release whenever the
+client/server behavior or data contract becomes incompatible. The one-way gate
+does not prove to the server that the DLL is installed or that activation
+succeeded.
 
-Because this gate is intentionally one-way, it proves only that a matching
-server advertisement reached this client. It does not prove to the server that
-the DLL is installed or that activation succeeded.
-
-The mismatch message is inserted directly into the retail client's local chat
-queue as channel 1. It uses the same blue Instance presentation and tab
-filtering as a server `CHAT_MESSAGE`, but sends no chat or handshake packet.
-
-Contributor rules and the same integration contract are recorded in
-`AGENTS.md` and `CLAUDE.md`.
+Contributor requirements are in `AGENTS.md` and `CLAUDE.md`.

@@ -3,6 +3,7 @@
 #include "src/ClientPatches/UI/CombatTextScale/CombatTextScaleSetting.hpp"
 #include "src/ClientRuntime/EngineConfig.hpp"
 #include "src/ClientRuntime/EngineFont.hpp"
+#include "src/ClientRuntime/PatchSetting.hpp"
 #include "src/Utils/GameWindow/GameWindow.hpp"
 #include "src/Utils/Logger/Logger.hpp"
 
@@ -156,6 +157,11 @@ std::atomic<int> g_loggedCombatFontState{0};
 std::atomic<int> g_loggedReticuleFontState{0};
 std::atomic<int> g_loggedReticuleWarningFontState{0};
 #endif
+// Damage numbers draw every entry three times (two black shadow passes, then the coloured text), for every visible
+// pawn every frame. Skipping the shadow passes removes two of the three text draws; each pass sets its own position
+// and colour first, so the coloured text is unchanged. Opt-in (default off): the outline keeps numbers readable
+// over bright backgrounds. Set once at install, before the hook is attached.
+bool g_skipCombatTextShadows = false;
 thread_local CombatContext g_combatContext = {};
 thread_local RawNameContext g_rawNameContext = {};
 
@@ -729,6 +735,8 @@ bool ClientCombatTextScalePatch::ApplyScalePercent(int percent) {
 }
 
 LONG ClientCombatTextScalePatch::Install() {
+	// The shadow skip lives in the DrawText hook this patch installs anyway, so it needs no hook of its own.
+	g_skipCombatTextShadows = PatchSetting::Enabled("CombatTextShadowsOff", false);
 	LONG result = ClientCombatTextScalePatchBase::Install();
 	if (result == NO_ERROR) {
 		result = ::DetourAttach(
@@ -767,6 +775,10 @@ void __fastcall ClientCombatTextScalePatch::Call(
 	void* canvasPointer, void* edx, const void* textPointer) {
 	const std::uintptr_t returnAddress =
 		reinterpret_cast<std::uintptr_t>(__builtin_return_address(0));
+	if (g_skipCombatTextShadows &&
+		(returnAddress == kCombatFirstShadowReturn || returnAddress == kCombatSecondShadowReturn)) {
+		return;
+	}
 	if (!canvasPointer || !textPointer) {
 		CallOriginal(canvasPointer, edx, textPointer);
 		return;

@@ -24,6 +24,39 @@ All bundled changes are client-side and require no server support.
 - **Friendly overhead-label normalization** keeps player, agency, and alliance
   labels proportional above 1080p.
 
+### Performance
+
+- **Render command signalling** stops waking the sleeping render thread through
+  the kernel after every render command: the render thread spins briefly
+  before sleeping, and the game thread signals it only while it sleeps.
+- **Foot placement off** skips per-pawn foot IK ground traces; feet follow the
+  animation instead of adapting to slopes.
+- **Combat text shadows off** (opt-in) skips the two black shadow passes drawn
+  under every damage number. It is off by default because the outline keeps
+  numbers readable over bright backgrounds.
+
+Measured with 80 AI robots in view (frame-time recorder switching each patch
+on and off live in the same scene):
+
+| Scene | All on | Without render signalling | With retail foot placement |
+|---|---|---|---|
+| Robots idle/wandering | ~222 fps | ~174 fps | ~159 fps |
+| Robots firing at the player | ~101 fps | ~79 fps | ~90 fps |
+
+Combat text shadows matter only with many damage numbers on screen: about
+0% at 800 numbers/s, ~4% at 4,000/s and ~8% at 10,500/s.
+
+Each is switched in `TgGame\Config\TgEngine.ini` with `1` (on) or `0` (off),
+read at game start. Without a line, render signalling and foot placement off
+are on and combat text shadows off is off, as shown:
+
+```ini
+[Commonwealth.ClientPatch]
+RenderCommandSignal=1
+FootPlacementOff=1
+CombatTextShadowsOff=0
+```
+
 ### Features
 
 - **Field of view slider** in the Video settings.

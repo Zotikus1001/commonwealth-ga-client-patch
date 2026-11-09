@@ -3,6 +3,8 @@
 #include "src/pch.hpp"
 
 #include "src/ClientPatches/PerformanceOptimizations/Audio/AudioUpdatePerformancePatch.hpp"
+#include "src/ClientPatches/PerformanceOptimizations/RenderCommandSignal/RenderCommandSignalPatch.hpp"
+#include "src/ClientPatches/PerformanceOptimizations/FootPlacement/FootPlacementPatch.hpp"
 #include "src/ClientPatches/MorphRebuildPerformance/MorphRebuildPerformancePatch.hpp"
 #include "src/ClientPatches/ScopedWeaponVisibility/ScopedWeaponVisibilityPatch.hpp"
 #include "src/ClientPatches/Camera/JetpackAimAlignment/JetpackAimAlignmentPatch.hpp"
@@ -60,6 +62,8 @@ bool InitializeRuntimeDiagnostics() {
 	Logger::EnableCrashChannel("morphprofile");
 	Logger::EnableChannel("audioprofile");
 	Logger::EnableCrashChannel("audioprofile");
+	Logger::EnableChannel("rendersignal");
+	Logger::EnableCrashChannel("rendersignal");
 #endif
 
 	// Crash capture snapshots the same atomically published directory used by
@@ -114,6 +118,8 @@ DWORD WINAPI InstallHooks(LPVOID) {
 
 	result = ::DetourUpdateThread(::GetCurrentThread());
 	if (result == NO_ERROR) result = ClientAudioUpdatePerformancePatch::Install();
+	if (result == NO_ERROR) result = ClientRenderCommandSignalPatch::Install();
+	if (result == NO_ERROR) result = ClientFootPlacementPatch::Install();
 	if (result == NO_ERROR) result = ClientMorphRebuildPerformancePatch::Install();
 	if (result == NO_ERROR) result = ClientScopedWeaponVisibilityPatch::Install();
 	if (result == NO_ERROR) result = ClientJetpackAimAlignmentPatch::Install();
@@ -142,10 +148,11 @@ DWORD WINAPI InstallHooks(LPVOID) {
 
 	Logger::Log(
 		"clientpatch",
-		"[ready] client patches installed: audio performance, morph rebuild, "
+		"[ready] client patches installed: audio performance, render command signal, "
+		"foot placement off, morph rebuild, "
 		"scoped weapon visibility, jetpack aim alignment, spectator nameplates, "
-		"FOV slider, combat text scaling, F2 stats scaling, friendly label "
-		"normalization\n");
+		"FOV slider, combat text scaling, combat text shadows off, F2 stats scaling, "
+		"friendly label normalization\n");
 	return 0;
 }
 
